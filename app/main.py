@@ -1,0 +1,285 @@
+"""Zerômetro: app de PC que lê os saves e mostra quanto falta para zerar.
+
+Roda um servidor só neste PC (127.0.0.1) e abre a tela numa janela do Edge em modo app.
+Fecha sozinho quando a janela é fechada.
+"""
+import json
+import logging
+import logging.handlers
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import readers
+import report
+import updater
+from readers import covers, paths, steam
+
+APP_VERSION = "0.3.8"
+UPDATE_REPO = "Igorms27/zerometro"  # "dono/repositorio" no GitHub onde as versões são publicadas
+BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+WEB = os.path.join(BASE, "web")
+
+log = logging.getLogger("zerometro")
+
+
+def setup_log():
+    h = logging.handlers.RotatingFileHandler(paths.data_path("zerometro.log"), maxBytes=300_000, backupCount=1, encoding="utf-8")
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(h)
+    log.setLevel(logging.INFO)
+
+# ---------- biblioteca (um JSON no AppData) ----------
+
+_lib_lock = threading.Lock()
+
+
+def lib_load():
+    try:
+        with open(paths.data_path("library.json"), encoding="utf-8") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def lib_write(d):
+    tmp = paths.data_path("library.json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, paths.data_path("library.json"))
+
+# ---------- servidor ----------
+
+last_ping = [time.time()]
+GRACE = 15  # segundos sem sinal da janela até o app fechar (a janela dá sinal a cada 5 s)
+quit_now = threading.Event()
+GAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def pick_folder():
+    """Janela do Windows para escolher uma pasta."""
+    try:
+        import tkinter
+        from tkinter import filedialog
+        root = tkinter.Tk(); root.withdraw(); root.attributes("-topmost", True)
+        d = filedialog.askdirectory(title="Escolha a pasta onde o jogo guarda os saves")
+        root.destroy()
+        return os.path.normpath(d) if d else None
+    except Exception:
+        log.exception("escolher pasta")
+        return None
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        if not isinstance(body, (bytes, bytearray)):
+            body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 5_000_000:
+            raise ValueError("grande demais")
+        return json.loads(self.rfile.read(n) or b"{}") if n else {}
+
+    def _local_only(self):
+        # bloqueia páginas de outros sites tentando falar com este servidor
+        host = (self.headers.get("Host") or "").split(":")[0]
+        origin = self.headers.get("Origin")
+        if host not in ("127.0.0.1", "localhost") or (origin and not re.match(r"^http://(127\.0\.0\.1|localhost):\d+$", origin)):
+            self._send(403, {"ok": False, "erro": "proibido"})
+            return False
+        return True
+
+    def do_GET(self):
+        if not self._local_only():
+            return
+        last_ping[0] = time.time()
+        p = self.path.split("?")[0]
+        try:
+            if p in ("/", "/index.html"):
+                with open(os.path.join(WEB, "index.html"), "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            if p == "/icon.svg":
+                with open(os.path.join(WEB, "icon.svg"), "rb") as f:
+                    return self._send(200, f.read(), "image/svg+xml")
+            if p == "/api/ping":
+                return self._send(200, {"ok": True, "version": APP_VERSION, "update": updater.state["ready"],
+                                        "latest": updater.state["latest"], "updateStatus": updater.state["status"],
+                                        "releases": "https://github.com/%s/releases/latest" % UPDATE_REPO})
+            if p == "/api/library":
+                with _lib_lock:
+                    return self._send(200, {"ok": True, "games": lib_load()})
+            if p == "/api/scan":
+                return self._send(200, {"ok": True, "games": readers.scan()})
+            if p == "/api/steam-games":
+                # todos os jogos da Steam instalados, cada um já com as pastas de save encontradas
+                out = []
+                for g in steam.installed_games():
+                    try:
+                        folders = report.find_folders(g["name"], g["appid"])
+                    except Exception:
+                        log.exception("procurar saves de %s", g["name"])
+                        folders = []
+                    out.append(dict(appid=g["appid"], name=g["name"], folders=folders))
+                out.sort(key=lambda g: (not g["folders"], g["name"].lower()))
+                return self._send(200, {"ok": True, "games": out})
+            if p.startswith("/api/cover/"):
+                data = covers.get(p.rsplit("/", 1)[1])
+                if not data:
+                    return self._send(404, {"ok": False})
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            if p == "/api/report/pick":
+                return self._send(200, {"ok": True, "folder": pick_folder()})
+        except Exception as e:
+            log.exception("GET %s", p)
+            return self._send(500, {"ok": False, "erro": str(e)})
+        self._send(404, {"ok": False})
+
+    def do_PUT(self):
+        if not self._local_only():
+            return
+        m = re.match(r"^/api/library/([^/]+)$", self.path)
+        if not m or not GAME_ID.match(m.group(1)):
+            return self._send(404, {"ok": False})
+        try:
+            body = self._body()
+            with _lib_lock:
+                d = lib_load(); d[m.group(1)] = body; lib_write(d)
+            self._send(200, {"ok": True})
+        except Exception as e:
+            log.exception("PUT")
+            self._send(500, {"ok": False, "erro": str(e)})
+
+    def do_DELETE(self):
+        if not self._local_only():
+            return
+        m = re.match(r"^/api/library/([^/]+)$", self.path)
+        if not m:
+            return self._send(404, {"ok": False})
+        with _lib_lock:
+            d = lib_load(); d.pop(m.group(1), None); lib_write(d)
+        self._send(200, {"ok": True})
+
+    def do_POST(self):
+        if not self._local_only():
+            return
+        try:
+            body = self._body()
+            if self.path == "/api/bye":
+                # a janela foi fechada (ou recarregada): fecha em ~4 s, a não ser que ela volte a dar sinal
+                last_ping[0] = time.time() - GRACE + 4
+                log.info("janela avisou que fechou")
+                return self._send(200, {"ok": True})
+            if self.path == "/api/quit":
+                # outra versão do app está abrindo e pediu a vez
+                quit_now.set()
+                return self._send(200, {"ok": True})
+            if self.path == "/api/report/find":
+                return self._send(200, {"ok": True, "folders": report.find_folders(str(body.get("name") or ""), body.get("appid"))})
+            if self.path == "/api/report/build":
+                folders = [f for f in body.get("folders") or [] if isinstance(f, str) and os.path.isdir(f)]
+                if not folders and not body.get("appid"):
+                    return self._send(400, {"ok": False, "erro": "escolha pelo menos uma pasta"})
+                r = report.build(str(body.get("name") or "jogo"), body.get("appid"), folders, APP_VERSION)
+                log.info("relatório criado: %s", r["path"])
+                return self._send(200, dict(r, ok=True))
+            if self.path == "/api/report/show":
+                p = str(body.get("path") or "")
+                if os.path.isfile(p) and os.path.basename(p).startswith("Zerometro-relatorio-"):
+                    subprocess.Popen(["explorer", "/select,", p])
+                return self._send(200, {"ok": True})
+        except Exception as e:
+            log.exception("POST %s", self.path)
+            return self._send(500, {"ok": False, "erro": str(e)})
+        self._send(404, {"ok": False})
+
+# ---------- janela ----------
+
+def find_edge():
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
+        if base:
+            p = os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe")
+            if os.path.exists(p):
+                return p
+    return shutil.which("msedge")
+
+
+def open_window(url):
+    edge = find_edge()
+    if edge:
+        prof = paths.data_path("janela")
+        subprocess.Popen([edge, "--app=" + url, "--user-data-dir=" + prof, "--no-first-run",
+                          "--start-maximized", "--disable-features=Translate",
+                          # janela minimizada continua dando sinal (senão o Edge atrasa os timers e o app fecharia)
+                          "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+                          "--disable-backgrounding-occluded-windows"])
+    else:
+        webbrowser.open(url)
+
+
+def already_running():
+    """Se o app já está aberto, só abre outra janela dele."""
+    try:
+        port = int(open(paths.data_path("porta.txt")).read().strip())
+        base = "http://127.0.0.1:%d" % port
+        with urllib.request.urlopen(base + "/api/ping", timeout=1) as r:
+            old = json.load(r).get("version")
+    except (OSError, ValueError):
+        return False
+    if old != APP_VERSION:
+        # o que está aberto é outra versão (ex.: antes de atualizar): pede para ela fechar e abre esta
+        try:
+            urllib.request.urlopen(urllib.request.Request(base + "/api/quit", data=b"{}", method="POST"), timeout=1).close()
+        except OSError:
+            pass  # versões antigas não têm /api/quit; fecham sozinhas quando a janela delas fechar
+        log.info("versão %s estava aberta; abrindo a %s", old, APP_VERSION)
+        return False
+    open_window(base + "/")
+    return True
+
+
+def main():
+    setup_log()
+    if already_running():
+        return
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = srv.server_address[1]
+    open(paths.data_path("porta.txt"), "w").write(str(port))
+    log.info("Zerômetro %s na porta %d", APP_VERSION, port)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=updater.loop, args=(APP_VERSION, UPDATE_REPO), daemon=True).start()
+    if "--sem-janela" not in sys.argv:
+        open_window("http://127.0.0.1:%d/" % port)
+    # a tela manda sinal a cada 5 s; sem sinal por GRACE s (janela fechada), o app fecha
+    last_ping[0] = time.time() + 30
+    while time.time() - last_ping[0] < GRACE and not quit_now.is_set():
+        time.sleep(1)
+    log.info("janela fechada, saindo")
+    srv.shutdown()
+
+
+if __name__ == "__main__":
+    main()
