@@ -4,10 +4,11 @@ O save (Unreal, formato GVAS) guarda várias cópias do estado; usamos a de maio
 Dentro dela, a lista SetBooleanVariables tem uma marca para cada enigma resolvido ("E1:Puzzle3"),
 cada torre ativada ("E1:TowerActive") e cada etapa das megaestruturas.
 """
-import glob
 import os
 import re
 import struct
+
+from . import base as common
 
 ID, NAME, PLATFORM = "talos2", "The Talos Principle 2", "PC · Steam"
 STEAM_APPID = "835960"
@@ -99,33 +100,20 @@ def analyze(st):
     for s in segs:
         if s["here"] and not s["done"] and s["frac"] == 0:
             s["frac"] = 0.1
-    total = sum(s["h"] for s in segs)
-    got = sum(s["h"] * s["frac"] for s in segs)
-    fin = final
-    started = got > 0
-    c = dict(key="base", status="zerado" if fin else ("andamento" if started else "nao_iniciado"),
-             pct=round(100.0 if fin else got / total * 100, 1), total=total, left=round(total - got, 2),
-             pace=1.0, paceKnown=False,
-             segs=[dict(title=s["title"], h=s["h"], frac=round(s["frac"], 2), done=s["done"]) for s in segs])
-    return dict(current="base", contents=[c])
+    return dict(current="base", contents=[common.build_content("base", segs, finished=final)])
 
 
 def latest(cache):
-    files = []
-    for d in save_dirs():
-        files += glob.glob(os.path.join(d, "savedata_*.sav"))
-    if not files:
+    found = common.find_latest(save_dirs(), "savedata_*.sav")
+    if not found:
         return None
-    path = max(files, key=os.path.getmtime)
-    mtime = os.path.getmtime(path)
-    key = (ID, path, mtime)
-    if key not in cache:
+    path, mtime = found
+
+    def compute():
         st = read_save(path)
         res = analyze(st)
         area = dict(AREAS).get(st["world"].split("_")[0])
         res.update(playH=st["playH"], saveFile=("Em " + area) if area else os.path.basename(path),
                    saveDate=int(mtime * 1000), cover=None, source="save")
-        for k in [k for k in cache if k[0] == ID]:
-            del cache[k]
-        cache[key] = res
-    return cache[key]
+        return res
+    return common.cached(cache, (ID, path, mtime), compute)

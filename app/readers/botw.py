@@ -1,10 +1,9 @@
 """Zelda: Breath of the Wild no Savage Wind Recomp (PC): lê as flags do game_data.sav."""
-import base64
-import glob
 import os
 import struct
 import zlib
 
+from . import base as common
 from . import paths
 
 ID, NAME, PLATFORM = "botw", "Zelda: Breath of the Wild", "PC · Savage Wind"
@@ -70,37 +69,22 @@ def botw_analyze(raw):
             started = done or any(on(n) for n in d.get("start", []))
             frac = 1.0 if done else (0.0 if not started else (0.6 if any(on(n) for n in d.get("mid", [])) else 0.25))
             segs.append(dict(title=d["title"], h=d["h"], frac=frac, done=done, started=started))
-        total = sum(x["h"] for x in segs)
-        got = sum(x["h"] * x["frac"] for x in segs)
-        finished = all(x["done"] for x in segs)
-        any_started = any(x["started"] for x in segs)
-        contents.append(dict(key=key, status="zerado" if finished else ("andamento" if any_started else "nao_iniciado"),
-                             pct=round(100.0 if finished else got / total * 100, 1), total=total,
-                             left=round(total - got, 2), pace=1.0, paceKnown=False,
-                             segs=[dict(title=x["title"], h=x["h"], frac=round(x["frac"], 2), done=x["done"]) for x in segs]))
+        contents.append(common.build_content(key, segs, finished=all(x["done"] for x in segs),
+                                             started=any(x["started"] for x in segs)))
     cur = next((c for c in reversed(contents) if c["status"] == "andamento"), None) or contents[0]
     return dict(current=cur["key"], playH=round(get("PlayReport_PlayTime") / 3600, 1), contents=contents)
 
 
-
 def latest(cache):
-    slots = []
-    for d in save_dirs():
-        if d and os.path.isdir(d):
-            slots += glob.glob(os.path.join(d, "*", "game_data.sav"))
-    if not slots:
+    found = common.find_latest(save_dirs(), os.path.join("*", "game_data.sav"))
+    if not found:
         return None
-    path = max(slots, key=os.path.getmtime)
-    mtime = os.path.getmtime(path)
-    key = (ID, path, mtime)
-    if key not in cache:
+    path, mtime = found
+
+    def compute():
         with open(path, "rb") as f:
             res = botw_analyze(f.read())
-        cover = None
-        jpg = os.path.join(os.path.dirname(path), "caption.jpg")
-        if os.path.exists(jpg) and os.path.getsize(jpg) < 180000:
-            with open(jpg, "rb") as f:
-                cover = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
-        res.update(saveFile="slot " + os.path.basename(os.path.dirname(path)), saveDate=int(mtime * 1000), cover=cover, source="save")
-        cache[key] = res
-    return cache[key]
+        res.update(saveFile="slot " + os.path.basename(os.path.dirname(path)), saveDate=int(mtime * 1000),
+                   cover=common.cover_from(os.path.join(os.path.dirname(path), "caption.jpg")), source="save")
+        return res
+    return common.cached(cache, (ID, path, mtime), compute)
