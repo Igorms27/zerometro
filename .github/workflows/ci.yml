@@ -1,0 +1,77 @@
+name: CI
+
+# Em PR e em push na main: roda os testes.
+# Ao empurrar uma tag v*: roda os testes, gera o Zerometro.exe (build.ps1) e cria o release com
+# Zerometro.exe + version.json (mesma logica do publicar.ps1, que continua funcionando na maquina do Igor).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Instalar dependencias de teste
+        run: python -m pip install -r requirements-dev.txt
+      - name: Rodar os testes
+        run: python -m pytest -q
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Conferir tag, versao e se o release ja existe
+        id: check
+        shell: pwsh
+        run: |
+          $ver  = [regex]::Match((Get-Content app\main.py -Raw -Encoding UTF8), 'APP_VERSION = "([^"]+)"').Groups[1].Value
+          $repo = [regex]::Match((Get-Content app\main.py -Raw -Encoding UTF8), 'UPDATE_REPO = "([^"]+)"').Groups[1].Value
+          if (-not $ver -or -not $repo) { throw "APP_VERSION ou UPDATE_REPO vazio em app\main.py" }
+          if ("v$ver" -ne $env:GITHUB_REF_NAME) { throw "A tag $env:GITHUB_REF_NAME nao bate com APP_VERSION v$ver em app\main.py" }
+          if ($repo -ne $env:GITHUB_REPOSITORY) { throw "UPDATE_REPO ($repo) e diferente do repositorio ($env:GITHUB_REPOSITORY)" }
+          # publicar.ps1 cria o release (e a tag) pela maquina local: nesse caso nao ha o que fazer aqui
+          gh release view "v$ver" --repo $repo *> $null
+          $existe = ($LASTEXITCODE -eq 0)
+          $global:LASTEXITCODE = 0
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+          "skip=$($existe.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if ($existe) { Write-Host "::notice::O release v$ver ja existe (publicado pelo publicar.ps1); nada a fazer." }
+
+      - name: Gerar o exe
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Criar version.json e o release
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.check.outputs.ver }}"
+          $exe = "dist\Zerometro.exe"
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $json = @{ version = $ver; sha256 = $sha } | ConvertTo-Json -Compress
+          [IO.File]::WriteAllText("$PWD\dist\version.json", $json)
+          Get-Content dist\version.json
+          gh release create "v$ver" $exe "dist\version.json" --repo $env:GITHUB_REPOSITORY --verify-tag --title "Zerômetro $ver" --notes "Zerômetro $ver (gerado pelo GitHub Actions)" --latest
+          if ($LASTEXITCODE) { throw "publicacao falhou" }

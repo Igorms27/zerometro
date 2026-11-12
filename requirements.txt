@@ -1,4 +1,4 @@
-# Dependencias de build do Zerometro.
-# O app usa apenas a biblioteca padrao do Python 3.12 (inclui tkinter, winreg, ctypes).
-# INFERIDO do build.ps1: PyInstaller (versao nao fixada), instalado com "pip install --user pyinstaller".
-pyinstaller
+# Dependencias de build do Zerometro (versao fixada para o build ser reproduzivel).
+# O app em si usa apenas a biblioteca padrao do Python 3.12 (inclui tkinter, winreg, ctypes).
+# Use Python 3.12. O build.ps1 instala isto num venv (.venv) e o CI tambem.
+pyinstaller==6.22.3
