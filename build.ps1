@@ -2,8 +2,15 @@
 # Uso: clique com o botão direito > Executar com o PowerShell, ou: powershell -ExecutionPolicy Bypass -File build.ps1
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
-$py = "python"
-& $py -m pip install --user --quiet pyinstaller
+# venv local (.venv, ignorado pelo git) com as versões fixadas em requirements.txt: o build sai igual em qualquer dia
+$venv = "$PSScriptRoot\.venv"
+if (-not (Test-Path "$venv\Scripts\python.exe")) {
+    & python -m venv $venv
+    if ($LASTEXITCODE) { throw "não consegui criar o venv" }
+}
+$py = "$venv\Scripts\python.exe"
+& $py -m pip install --quiet --disable-pip-version-check -r "$PSScriptRoot\requirements.txt"
+if ($LASTEXITCODE) { throw "pip install falhou" }
 # se o app estiver aberto, o exe não pode ser apagado, mas pode ser renomeado
 $exe = "$PSScriptRoot\dist\Zerometro.exe"
 Remove-Item "$exe.old" -ErrorAction SilentlyContinue

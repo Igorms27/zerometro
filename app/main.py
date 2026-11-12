@@ -3,16 +3,20 @@
 Roda um servidor só neste PC (127.0.0.1) e abre a tela numa janela do Edge em modo app.
 Fecha sozinho quando a janela é fechada.
 """
+import hmac
+import http.cookies
 import json
 import logging
 import logging.handlers
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -62,6 +66,8 @@ last_ping = [time.time()]
 GRACE = 15  # segundos sem sinal da janela até o app fechar (a janela dá sinal a cada 5 s)
 quit_now = threading.Event()
 GAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+TOKEN = secrets.token_urlsafe(24)  # novo a cada abertura; a janela recebe na URL e guarda num cookie
+PUBLIC_API = ("/api/ping",)  # só diz a versão; a abertura de outra instância precisa disso antes de ter o token
 
 
 def pick_folder():
@@ -107,11 +113,47 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def do_GET(self):
+    def _token_ok(self):
+        cookie = "zm_%d" % self.server.server_address[1]  # cookies não separam portas do 127.0.0.1
+        sent = self.headers.get("X-ZM-Token")
+        if not sent:
+            c = http.cookies.SimpleCookie()
+            try:
+                c.load(self.headers.get("Cookie") or "")
+            except http.cookies.CookieError:
+                return False
+            sent = c[cookie].value if cookie in c else ""
+        return hmac.compare_digest(sent.encode(), TOKEN.encode())
+
+    def _guard(self, path=None):
+        """Host/Origin locais + token (exceto /api/ping). Responde 403 e devolve False se não passar."""
         if not self._local_only():
-            return
-        last_ping[0] = time.time()
+            return False
+        if (path or self.path.split("?")[0]) in PUBLIC_API or self._token_ok():
+            return True
+        self._send(403, {"ok": False, "erro": "sem token"})
+        return False
+
+    def do_GET(self):
         p = self.path.split("?")[0]
+        if p in ("/", "/index.html"):
+            # a janela abre com /?t=TOKEN: guarda o token num cookie e recarrega a URL limpa
+            if not self._local_only():
+                return
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            if q.get("t") and hmac.compare_digest(q["t"][0].encode(), TOKEN.encode()):
+                self.send_response(302)
+                self.send_header("Set-Cookie", "zm_%d=%s; Path=/; HttpOnly; SameSite=Strict" % (self.server.server_address[1], TOKEN))
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if not self._token_ok():
+                return self._send(403, {"ok": False, "erro": "sem token"})
+        elif not self._guard(p):
+            return
+        if p != "/api/ping" or self._token_ok():
+            last_ping[0] = time.time()
         try:
             if p in ("/", "/index.html"):
                 with open(os.path.join(WEB, "index.html"), "rb") as f:
@@ -159,7 +201,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"ok": False})
 
     def do_PUT(self):
-        if not self._local_only():
+        if not self._guard():
             return
         m = re.match(r"^/api/library/([^/]+)$", self.path)
         if not m or not GAME_ID.match(m.group(1)):
@@ -174,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"ok": False, "erro": str(e)})
 
     def do_DELETE(self):
-        if not self._local_only():
+        if not self._guard():
             return
         m = re.match(r"^/api/library/([^/]+)$", self.path)
         if not m:
@@ -184,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True})
 
     def do_POST(self):
-        if not self._local_only():
+        if not self._guard():
             return
         try:
             body = self._body()
@@ -240,6 +282,18 @@ def open_window(url):
         webbrowser.open(url)
 
 
+def _saved_token():
+    try:
+        with open(paths.data_path("token.txt"), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _url_token():
+    return "?t=" + urllib.parse.quote(_saved_token())
+
+
 def already_running():
     """Se o app já está aberto, só abre outra janela dele."""
     try:
@@ -252,12 +306,13 @@ def already_running():
     if old != APP_VERSION:
         # o que está aberto é outra versão (ex.: antes de atualizar): pede para ela fechar e abre esta
         try:
-            urllib.request.urlopen(urllib.request.Request(base + "/api/quit", data=b"{}", method="POST"), timeout=1).close()
+            urllib.request.urlopen(urllib.request.Request(base + "/api/quit", data=b"{}", method="POST",
+                                                          headers={"X-ZM-Token": _saved_token()}), timeout=1).close()
         except OSError:
             pass  # versões antigas não têm /api/quit; fecham sozinhas quando a janela delas fechar
         log.info("versão %s estava aberta; abrindo a %s", old, APP_VERSION)
         return False
-    open_window(base + "/")
+    open_window(base + "/" + _url_token())
     return True
 
 
@@ -267,12 +322,15 @@ def main():
         return
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
-    open(paths.data_path("porta.txt"), "w").write(str(port))
+    with open(paths.data_path("porta.txt"), "w") as f:
+        f.write(str(port))
+    with open(paths.data_path("token.txt"), "w", encoding="utf-8") as f:  # só para uma 2ª abertura do app achar esta
+        f.write(TOKEN)
     log.info("Zerômetro %s na porta %d", APP_VERSION, port)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     threading.Thread(target=updater.loop, args=(APP_VERSION, UPDATE_REPO), daemon=True).start()
     if "--sem-janela" not in sys.argv:
-        open_window("http://127.0.0.1:%d/" % port)
+        open_window("http://127.0.0.1:%d/?t=%s" % (port, TOKEN))
     # a tela manda sinal a cada 5 s; sem sinal por GRACE s (janela fechada), o app fecha
     last_ping[0] = time.time() + 30
     while time.time() - last_ping[0] < GRACE and not quit_now.is_set():
