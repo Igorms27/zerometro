@@ -131,8 +131,18 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if (path or self.path.split("?")[0]) in PUBLIC_API or self._token_ok():
             return True
+        self._drain()
         self._send(403, {"ok": False, "erro": "sem token"})
         return False
+
+    def _drain(self):
+        # lê (e joga fora) o corpo antes de recusar: fechar com corpo não lido faz o cliente receber um reset
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if 0 < n <= 5_000_000:
+                self.rfile.read(n)
+        except (ValueError, OSError):
+            pass
 
     def do_GET(self):
         p = self.path.split("?")[0]
@@ -169,7 +179,9 @@ class Handler(BaseHTTPRequestHandler):
                 with _lib_lock:
                     return self._send(200, {"ok": True, "games": lib_load()})
             if p == "/api/scan":
-                return self._send(200, {"ok": True, "games": readers.scan()})
+                found = readers.scan()
+                return self._send(200, {"ok": True, "games": [g for g in found if "erro" not in g],
+                                        "erros": [g for g in found if "erro" in g]})
             if p == "/api/steam-games":
                 # todos os jogos da Steam instalados, cada um já com as pastas de save encontradas
                 out = []
@@ -320,6 +332,9 @@ def main():
     setup_log()
     if already_running():
         return
+    if updater.startup(APP_VERSION):  # a versão nova caiu duas vezes: voltou para a antiga e abriu ela
+        return
+    t_start = time.time()
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
     with open(paths.data_path("porta.txt"), "w") as f:
@@ -337,6 +352,7 @@ def main():
         time.sleep(1)
     log.info("janela fechada, saindo")
     srv.shutdown()
+    updater.finish(time.time() - t_start)
 
 
 if __name__ == "__main__":
