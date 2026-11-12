@@ -8,6 +8,7 @@ import glob
 import os
 import re
 
+from . import base as common
 from . import paths, steam
 
 ID, NAME, PLATFORM = "hfw", "Horizon Forbidden West", "PC · Steam"
@@ -98,30 +99,23 @@ def analyze(header, ach):
         cur = next((s for s in segs if s["here"] and not s["done"]), None) or (next((s for s in segs if not s["done"]), None) if started else None)
         if cur:
             cur["frac"] = 0.5 if cur["here"] else 0.25
-        total = sum(s["h"] for s in segs)
-        got = sum(s["h"] * s["frac"] for s in segs)
-        fin = all(s["done"] for s in segs)
-        contents.append(dict(key=key, status="zerado" if fin else ("andamento" if started else "nao_iniciado"),
-                             pct=round(100.0 if fin else got / total * 100, 1), total=total, left=round(total - got, 2),
-                             pace=1.0, paceKnown=False,
-                             segs=[dict(title=s["title"], h=s["h"], frac=round(s["frac"], 2), done=s["done"]) for s in segs]))
+        contents.append(common.build_content(key, segs, finished=all(s["done"] for s in segs), started=started))
     andamento = [c for c in contents if c["status"] == "andamento"]
     cur = max(andamento, key=lambda c: last.get(c["key"], 0)) if andamento else contents[0]
     return dict(current=cur["key"], contents=contents)
 
 
 def latest(cache):
-    files = []
-    for d in save_dirs():
-        files += [p for p in glob.glob(os.path.join(d, "*.dat")) if os.path.basename(p).lower() != "profile.dat"]
-    if not files:
+    dirs = save_dirs()
+    found = common.find_latest(dirs, "*.dat", exclude=["profile.dat"])
+    if not found:
         return None
-    path = max(files, key=os.path.getmtime)
-    mtime = os.path.getmtime(path)
+    path, mtime = found
+    files = common.find_files(dirs, "*.dat", exclude=["profile.dat"])
     schema, users = steam.stats_files(STEAM_APPID)
     stamp = max([os.path.getmtime(u) for u in users] + [0])
-    key = (ID, path, mtime, stamp)
-    if key not in cache:
+
+    def compute():
         headers = []
         for p in files:
             try:
@@ -129,7 +123,7 @@ def latest(cache):
             except (OSError, ValueError):
                 pass
         if not headers:
-            return None
+            raise ValueError("nenhum save legível")  # há saves, mas nenhum foi lido: aparece como aviso
         # o save mais avançado (mais tempo de jogo) é o atual
         headers.sort(key=lambda h: -h["playH"])
         newest = headers[0]
@@ -141,7 +135,5 @@ def latest(cache):
         res = analyze(story, ach)
         res.update(playH=newest["playH"], saveFile=newest["title"] or os.path.basename(path),
                    saveDate=int(mtime * 1000), cover=read_cover(path), source="save")
-        for k in [k for k in cache if k[0] == ID]:
-            del cache[k]
-        cache[key] = res
-    return cache[key]
+        return res
+    return common.cached(cache, (ID, path, mtime, stamp), compute)

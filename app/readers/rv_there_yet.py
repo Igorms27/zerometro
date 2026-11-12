@@ -9,6 +9,7 @@ import os
 import re
 import struct
 
+from . import base as common
 from . import steam
 
 ID, NAME, PLATFORM = "rvty", "RV There Yet?", "PC · Steam"
@@ -72,27 +73,20 @@ def analyze(metas, ach):
             nxt = next((s for s in segs if s["frac"] == 0), None)
             if nxt:
                 nxt["frac"] = 0.3
-        total = sum(s["h"] for s in segs)
-        got = sum(s["h"] * s["frac"] for s in segs)
-        contents.append(dict(key=key, status="zerado" if fin else ("andamento" if started else "nao_iniciado"),
-                             pct=round(100.0 if fin else got / total * 100, 1), total=round(total, 2), left=round(total - got, 2),
-                             pace=1.0, paceKnown=False,
-                             segs=[dict(title=s["title"], h=round(s["h"], 2), frac=s["frac"], done=s["frac"] >= 1) for s in segs]))
+        contents.append(common.build_content(key, segs, finished=fin, started=started, ndigits=2))
     playing = [c for c in contents if c["status"] == "andamento"]
     cur = max(playing, key=lambda c: last.get(c["key"], 0)) if playing else max(contents, key=lambda c: last.get(c["key"], 0))
     return dict(current=cur["key"], contents=contents)
 
 
 def latest(cache):
-    files = []
-    for d in save_dirs():
-        files += glob.glob(os.path.join(d, "*.meta.sav"))
+    files = common.find_files(save_dirs(), "*.meta.sav")
     schema, users = steam.stats_files(STEAM_APPID)
     if not files and not schema:
         return None
     stamp = tuple(sorted((p, os.path.getmtime(p)) for p in files)) + tuple(os.path.getmtime(u) for u in users)
-    key = (ID, stamp)
-    if key not in cache:
+
+    def compute():
         metas = []
         for p in files:
             try:
@@ -100,7 +94,10 @@ def latest(cache):
             except (OSError, ValueError):
                 pass
         ach = steam.achievements(STEAM_APPID) or {}
-        if not metas and not any(v["unlocked"] for v in ach.values()):
+        has_ach = any(v["unlocked"] for v in ach.values())
+        if files and not metas and not has_ach:
+            raise ValueError("nenhum save legível")  # há saves, mas nenhum foi lido: aparece como aviso
+        if not metas and not has_ach:
             return None
         res = analyze(metas, ach)
         newest = max(metas, key=lambda m: m["mtime"]) if metas else None
@@ -108,7 +105,5 @@ def latest(cache):
                    saveFile=LABELS.get(res["current"], ""),
                    saveDate=int((newest["mtime"] if newest else max([os.path.getmtime(u) for u in users] + [0])) * 1000),
                    cover=None, source="save" if metas else "steam")
-        for k in [k for k in cache if k[0] == ID]:
-            del cache[k]
-        cache[key] = res
-    return cache[key]
+        return res
+    return common.cached(cache, (ID, stamp), compute)
