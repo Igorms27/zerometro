@@ -17,6 +17,7 @@ Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informa
 | Zelda: Breath of the Wild (Savage Wind Recomp) | História e A Balada dos Campeões |
 | Horizon Forbidden West | História e Burning Shores |
 | The Talos Principle 2 | História, área por área |
+| RV There Yet? | Mabutts Valley, Mt. Yurbuttsk e St. Büttin Bay |
 
 Se o app não conseguir ler o save de um jogo da Steam que ele conhece, ele calcula pelas suas conquistas.
 
