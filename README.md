@@ -16,6 +16,7 @@ Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informa
 | The Witcher 3 | História, Hearts of Stone e Blood and Wine |
 | Zelda: Breath of the Wild (Savage Wind Recomp) | História e A Balada dos Campeões |
 | Horizon Forbidden West | História e Burning Shores |
+| The Talos Principle 2 | História, área por área |
 
 Se o app não conseguir ler o save de um jogo da Steam que ele conhece, ele calcula pelas suas conquistas.
 
