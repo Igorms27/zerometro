@@ -19,6 +19,7 @@ if (Test-Path $exe) { try { Remove-Item $exe -ErrorAction Stop } catch { Rename-
     --icon "$PSScriptRoot\app\icon\app.ico" `
     --distpath dist --workpath build --specpath build `
     --add-data "$PSScriptRoot\app\web;web" `
+    --add-data "$PSScriptRoot\app\games.json;." `
     app\main.py
 if ($LASTEXITCODE) { throw "PyInstaller falhou" }
 Write-Host "Pronto: $PSScriptRoot\dist\Zerometro.exe"

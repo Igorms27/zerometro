@@ -344,6 +344,7 @@ def main():
     log.info("Zerômetro %s na porta %d", APP_VERSION, port)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     threading.Thread(target=updater.loop, args=(APP_VERSION, UPDATE_REPO), daemon=True).start()
+    threading.Thread(target=readers.by_achievements.refresh, daemon=True).start()  # mapa de jogos (games.json); sem rede, usa o que já tem
     if "--sem-janela" not in sys.argv:
         open_window("http://127.0.0.1:%d/?t=%s" % (port, TOKEN))
     # a tela manda sinal a cada 5 s; sem sinal por GRACE s (janela fechada), o app fecha

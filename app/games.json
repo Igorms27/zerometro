@@ -1,0 +1,21 @@
+{
+ "schema": 1,
+ "games": {
+  "292030": {
+   "id": "w3",
+   "name": "The Witcher 3",
+   "platform": "PC · Steam",
+   "labels": {"base": "História principal"},
+   "contents": [
+    {"key": "base", "segs": [
+     {"title": "Pomar Branco", "h": 4, "ach": ["LILAC"]},
+     {"title": "Velen", "h": 11, "ach": ["FAMILY_COUNSELOR"]},
+     {"title": "Novigrad", "h": 13, "ach": ["FRIEND_IN_NEED"]},
+     {"title": "Skellige", "h": 9, "ach": ["NECROMANCER"]},
+     {"title": "Kaer Morhen", "h": 6, "ach": ["SOMETHING_MORE"]},
+     {"title": "Reta final", "h": 8.5, "ach": ["THE_KING", "PASSED_THE_TRIAL"]}
+    ]}
+   ]
+  }
+ }
+}

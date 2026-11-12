@@ -4,23 +4,20 @@ Cada jogo aqui diz quais conquistas fecham cada parte da história. Uma parte co
 quando qualquer uma das conquistas dela foi desbloqueada.
 """
 from . import base as common
-from . import steam
+from . import gamedata, steam
 
-# appid -> definição. Para adicionar um jogo: veja o schema no relatório e liste as conquistas de história.
-GAMES = {
-    "292030": dict(
-        id="w3", name="The Witcher 3", platform="PC · Steam",
-        labels={"base": "História principal"},
-        contents=[("base", [
-            dict(title="Pomar Branco", h=4, ach=["LILAC"]),
-            dict(title="Velen", h=11, ach=["FAMILY_COUNSELOR"]),
-            dict(title="Novigrad", h=13, ach=["FRIEND_IN_NEED"]),
-            dict(title="Skellige", h=9, ach=["NECROMANCER"]),
-            dict(title="Kaer Morhen", h=6, ach=["SOMETHING_MORE"]),
-            dict(title="Reta final", h=8.5, ach=["THE_KING", "PASSED_THE_TRIAL"]),
-        ])],
-    ),
-}
+# appid -> definição, lida de games.json (embutido no exe, com a cópia baixada por cima; ver gamedata.py).
+# Para adicionar um jogo: veja o schema no relatório e acrescente a entrada em app/games.json.
+GAMES = gamedata.load()
+
+
+def refresh():
+    """Baixa o games.json mais novo e troca o mapa na memória. Sem rede ou arquivo inválido: nada muda."""
+    new = gamedata.refresh()
+    if new:
+        GAMES.clear()
+        GAMES.update(new)
+    return bool(new)
 
 
 def analyze(appid):
