@@ -1,0 +1,16 @@
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.exe
+*.exe.old
+*.zip
+*.log
+*.tmp
+*.bak
+.venv/
+venv/
+.vscode/
+.idea/
+Thumbs.db

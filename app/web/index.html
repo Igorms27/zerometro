@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<title>Zerômetro</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;600;700;800&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: biblioteca de saves — um card por jogo com a capa do save; dentro, uma faixa por campanha (principal e DLCs) */
+:root {
+  --bg: #eef2f1; --bg-2: #e3e9e7; --surface: #ffffff; --ink: #10201f; --muted: #5a6e6c; --line: #d3dcda;
+  --gold: #9a6d12; --gold-soft: #f4ead3; --track: #dfe6e4; --cur: #1f6f6a; --cur-soft: #dcefec; --danger: #b3362c;
+  --shade: rgba(9, 20, 19, .72);
+  --f-display: "Oxanium", "Bahnschrift", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Manrope", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1517; --bg-2: #111c1e; --surface: #152124; --ink: #e8efec; --muted: #8ea3a0; --line: #233438;
+  --gold: #e2bb67; --gold-soft: #2e2716; --track: #213034; --cur: #5fc7bd; --cur-soft: #173235; --danger: #ff8172;
+  --shade: rgba(5, 10, 11, .78); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d1517; --bg-2: #111c1e; --surface: #152124; --ink: #e8efec; --muted: #8ea3a0; --line: #233438;
+  --gold: #e2bb67; --gold-soft: #2e2716; --track: #213034; --cur: #5fc7bd; --cur-soft: #173235; --danger: #ff8172;
+  --shade: rgba(5, 10, 11, .78); color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1000px; margin: 0 auto; padding-block: 22px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--f-display); margin: 0; line-height: 1.1; text-wrap: balance; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--cur); outline-offset: 2px; }
+code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .88em; }
+.num { font-family: var(--f-display); font-variant-numeric: tabular-nums; }
+.kicker { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+
+.top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 26px; }
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo svg { width: 30px; height: 30px; flex: none; }
+.logo h1 { font-size: 22px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.status { font-size: 13px; color: var(--muted); }
+.ver { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: 4px; }
+.ver .new { font-size: 12px; font-weight: 600; color: var(--cur); background: var(--cur-soft); border: 1px solid var(--cur); border-radius: 999px; padding: 2px 10px; text-decoration: none; }
+
+.btn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); padding: 10px 16px; border-radius: 10px; font-weight: 700; font-size: 14px; }
+.btn:hover { border-color: var(--cur); }
+.btn.main { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.main:hover { opacity: .9; }
+.btn.quiet { background: transparent; border-color: transparent; color: var(--muted); padding-inline: 8px; }
+.btn.quiet:hover { color: var(--ink); }
+.btn.danger { color: var(--danger); }
+
+/* Área de escolher o save */
+.loader { border: 1.5px dashed var(--line); border-radius: var(--r); background: var(--bg-2); transition: border-color .15s, background .15s; }
+.loader.over { border-color: var(--cur); background: var(--cur-soft); }
+.loader.big { padding: 34px 28px; display: grid; gap: 18px; justify-items: start; }
+.loader.big h2 { font-size: clamp(26px, 5vw, 38px); font-weight: 700; max-width: 18ch; }
+.loader.big p { margin: 0; color: var(--muted); max-width: 58ch; }
+.loader.slim { padding: 14px 18px; display: flex; gap: 12px 18px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+.loader.slim p { margin: 0; flex: 1 1 260px; min-width: 0; font-size: 14px; color: var(--muted); }
+.loader input[type=file] { display: none; }
+.path { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.path code { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; overflow-wrap: anywhere; user-select: all; }
+.supported { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-weight: 600; color: var(--ink); background: var(--surface); }
+.msg { width: 100%; }
+.note { padding: 11px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 14px; }
+.note.err { color: var(--danger); }
+
+/* Biblioteca */
+.library { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.card { position: relative; display: grid; text-align: left; border: 0; padding: 0; border-radius: var(--r); overflow: hidden; background: var(--surface);
+  box-shadow: 0 1px 0 var(--line), 0 10px 30px -18px rgba(0,0,0,.45); transition: transform .18s; min-width: 0; }
+.card:hover { transform: translateY(-2px); }
+.cover { position: relative; aspect-ratio: 16 / 7; max-width: 100%; background: radial-gradient(120% 140% at 80% 0%, var(--cur-soft), var(--bg-2)); overflow: hidden; }
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 30%, var(--shade)); }
+.cover .over { position: absolute; left: 18px; right: 18px; bottom: 14px; z-index: 1; color: #f2f5f3; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.cover .over h2 { font-size: 26px; font-weight: 700; }
+.cover .over .kicker { color: rgba(242,245,243,.8); }
+.cover .pctbig { font-family: var(--f-display); font-weight: 800; font-size: 44px; line-height: .9; font-variant-numeric: tabular-nums; text-align: right; }
+.cover .pctbig small { font-size: 18px; opacity: .75; }
+.cover .pctbig span { display: block; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; opacity: .8; margin-top: 4px; }
+.rows { padding: 14px 18px 16px; display: grid; gap: 10px; }
+.crow { display: grid; grid-template-columns: minmax(0, 9.5em) 1fr 4.2em; gap: 12px; align-items: center; font-size: 14px; }
+.crow .nm { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crow .pc { text-align: right; font-family: var(--f-display); font-weight: 700; font-variant-numeric: tabular-nums; }
+.crow.cur .nm, .crow.cur .pc { color: var(--cur); }
+.crow.idle { color: var(--muted); }
+.cardfoot { padding: 0 18px 14px; font-size: 12.5px; color: var(--muted); }
+
+/* Trilha: cada parte da história ocupa largura proporcional às horas */
+.trail { display: flex; gap: 3px; height: 8px; min-width: 0; }
+.trail.big { height: 14px; gap: 4px; }
+.trail i { display: block; min-width: 3px; border-radius: 3px; background: var(--track); }
+.trail i.d { background: var(--ink); }
+.trail i.c { background: linear-gradient(90deg, var(--cur) var(--p), var(--track) var(--p)); }
+.trail.full i { background: var(--gold); }
+
+/* Detalhe do jogo */
+.detail { display: grid; gap: 18px; }
+.dtop { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.banner { border-radius: var(--r); overflow: hidden; background: var(--surface); }
+.banner .cover { aspect-ratio: 16 / 5; }
+@media (max-width: 600px) { .banner .cover { aspect-ratio: 16 / 8; } }
+.banner .cover .over h2 { font-size: clamp(26px, 5vw, 40px); }
+.now { display: grid; grid-template-columns: 1fr auto; gap: 6px 24px; align-items: center; padding: 18px 20px; border-top: 1px solid var(--line); }
+.now .where { font-size: 17px; }
+.now .where strong { color: var(--cur); }
+.now .eta { text-align: right; }
+.now .eta b { display: block; font-family: var(--f-display); font-size: 28px; line-height: 1.1; }
+@media (max-width: 600px) { .now { grid-template-columns: 1fr; } .now .eta { text-align: left; } }
+
+.camp { background: var(--surface); border-radius: var(--r); padding: 20px; display: grid; gap: 14px; border: 1px solid var(--line); }
+.camp.cur { border-color: var(--cur); box-shadow: inset 4px 0 0 var(--cur); }
+.camp header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.camp h3 { font-size: 22px; font-weight: 700; }
+.pill { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--bg-2); color: var(--muted); white-space: nowrap; }
+.pill.go { background: var(--cur-soft); color: var(--cur); }
+.pill.win { background: var(--gold-soft); color: var(--gold); }
+.stats { display: flex; align-items: baseline; gap: 10px 28px; flex-wrap: wrap; }
+.stats .p { font-family: var(--f-display); font-weight: 800; font-size: 46px; line-height: 1; font-variant-numeric: tabular-nums; }
+.stats .p small { font-size: 20px; color: var(--muted); }
+.stats .kv { font-size: 14px; color: var(--muted); }
+.stats .kv b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: -6px; }
+details summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--muted); list-style: none; display: inline-flex; gap: 6px; align-items: center; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: "▸"; transition: transform .15s; }
+details[open] summary::before { transform: rotate(90deg); }
+.parts { list-style: none; margin: 10px 0 0; padding: 0; display: grid; }
+.part { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: center; padding: 9px 4px; border-top: 1px solid var(--line); font-size: 14.5px; }
+.part:first-child { border-top: 0; }
+.part .mk { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; }
+.part.d .mk { background: var(--ink); border-color: var(--ink); }
+.part.d .mk::after { content: ""; width: 7px; height: 4px; border: 2px solid var(--bg); border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+.part.c .mk { border-color: var(--cur); background: conic-gradient(var(--cur) var(--p), transparent 0); }
+.part.d .t { color: var(--muted); }
+.part.c .t { font-weight: 700; }
+.part .t small { display: block; font-weight: 500; color: var(--cur); font-size: 12.5px; }
+.part .h { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.spoiler { filter: blur(5px); user-select: none; cursor: pointer; }
+.toggle { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); cursor: pointer; }
+.toggle input { accent-color: var(--cur); }
+.confirm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.auto { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; font-size: 14px; color: var(--muted); margin-bottom: 14px; }
+.auto span:not(.dot) { flex: 1 1 260px; min-width: 0; }
+.auto strong { color: var(--ink); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
+.dot.on { background: var(--cur); box-shadow: 0 0 0 4px var(--cur-soft); }
+.dot.warn { background: var(--gold); }
+.foot { margin-top: 30px; font-size: 13px; color: var(--muted); max-width: 72ch; }
+.report { margin-top: 26px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 20px; display: flex; gap: 14px 20px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.report > div { flex: 1 1 320px; min-width: 0; }
+.report h3 { font-size: 18px; margin-bottom: 4px; }
+.report p { margin: 0; }
+.report.open { display: grid; gap: 14px; justify-content: stretch; }
+.report .field { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: var(--muted); max-width: 520px; }
+.report select, .report input:not([type]) { font: inherit; font-size: 15px; font-weight: 500; color: var(--ink); background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.report .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.report .folds { display: grid; gap: 8px; }
+.report .fold { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); cursor: pointer; }
+.report .fold input { accent-color: var(--cur); margin-top: 4px; }
+.report .fold code { overflow-wrap: anywhere; font-size: 13px; }
+.report .fold small { display: block; color: var(--muted); font-size: 12.5px; }
+.report .small { font-size: 13px; }
+.report .gamelist { display: grid; gap: 8px; max-height: 420px; overflow: auto; }
+.report .gamerow { display: flex; gap: 12px; align-items: center; justify-content: space-between; text-align: left; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); color: var(--ink); font: inherit; }
+.report .gamerow:hover { border-color: var(--cur); }
+.report .gamerow span:first-child { min-width: 0; }
+.report .gamerow small { display: block; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.btn[disabled] { opacity: .5; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="logo">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="var(--track)" stroke-width="4"/><circle cx="16" cy="16" r="13" fill="none" stroke="var(--cur)" stroke-width="4" stroke-dasharray="57 82" stroke-linecap="round" transform="rotate(-90 16 16)"/></svg>
+      <h1>Zerômetro</h1>
+      <span class="ver" id="ver" hidden></span>
+    </div>
+    <div class="status" id="status">Carregando…</div>
+  </header>
+  <main id="app"></main>
+  <p class="foot">A % de cada campanha soma as horas médias das partes que você já fez, mais o quanto avançou na parte atual. Side quests não contam. O ritmo compara quanto tempo você levou nas partes concluídas com a média dos jogadores. Os saves são lidos só neste PC e não são enviados para lugar nenhum.</p>
+</div>
+
+<script>
+// Modo aplicativo: a biblioteca fica num arquivo neste PC e os saves são lidos pelo próprio app.
+window.ZM_APP = true;
+(() => {
+  const api = (path, opt) => fetch(path, opt).then(r => r.json());
+  let listeners = [], lib = {};
+  const emit = () => { const docs = Object.entries(lib).map(([id, d]) => ({ id, data: () => d })); listeners.forEach(cb => cb({ docs, metadata: { fromCache: false } })); };
+  const db = { collection: () => ({
+    doc: id => ({
+      set: async body => { await api("/api/library/" + encodeURIComponent(id), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); lib[id] = body; emit(); },
+      delete: async () => { await api("/api/library/" + encodeURIComponent(id), { method: "DELETE" }); delete lib[id]; emit(); },
+    }),
+    onSnapshot: (cb, err) => { listeners.push(cb); api("/api/library").then(r => { lib = r.games || {}; emit(); }).catch(e => err && err(e)); return () => {}; },
+  }) };
+  const scan = async () => { const r = await api("/api/scan"); if (!r.ok) throw { code: "tool_error" }; return { structuredContent: { ok: true, games: r.games.map(g => ({ ...g, ok: true })) } }; };
+  const mcp = {
+    callTool: () => scan(),
+    watchTool: (h, t, a, cb, opt) => {
+      const run = () => scan().then(result => cb({ type: "data", result })).catch(error => cb({ type: "error", error }));
+      run(); setInterval(run, (opt && opt.refetchInterval) || 60000);
+    },
+  };
+  window.claude = { use: n => Promise.resolve(n === "db" ? db : n === "user" ? { id: async () => "local" } : n === "mcp" ? mcp : null) };
+  // ao fechar a janela, avisa o app para ele encerrar logo (e não ficar rodando em segundo plano)
+  window.addEventListener("pagehide", () => { try { navigator.sendBeacon("/api/bye", "{}"); } catch (e) {} });
+  // versão do app no topo e aviso de versão nova ao lado
+  const vnum = v => String(v || "").split(".").map(n => parseInt(n, 10) || 0);
+  const newer = (a, b) => { const x = vnum(a), y = vnum(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+  const zmPing = () => fetch("/api/ping").then(r => r.json()).then(p => {  // também avisa o app que a janela continua aberta
+    const el = document.getElementById("ver");
+    if (!el || !p || !p.version) return;
+    let badge = "";
+    if (p.update) badge = `<span class="new">Versão ${p.update} instalada · feche e abra o app</span>`;
+    else if (p.latest && newer(p.latest, p.version))
+      badge = p.updateStatus === "erro"
+        ? `<a class="new" href="${p.releases}" target="_blank" rel="noopener">Versão nova ${p.latest} · baixar</a>`
+        : `<span class="new">Versão nova ${p.latest} · baixando…</span>`;
+    const html = `v${p.version}${badge}`;
+    if (el.innerHTML !== html) el.innerHTML = html;
+    el.hidden = false;
+  }).catch(() => {});
+  zmPing(); setInterval(zmPing, 5000);
+})();
+</script>
+
+<script>
+/*W3CORE-START*/
+// Leitor de save do The Witcher 3 (PC): descomprime o .sav (LZ4) e lê os "facts",
+// marcações que o jogo grava quando algo acontece, cada uma com o tempo de jogo.
+const W3 = (() => {
+  function lz4Block(src, out, op) {
+    let i = 0; const n = src.length;
+    while (i < n) {
+      const tok = src[i++];
+      let lit = tok >> 4;
+      if (lit === 15) { let b; do { b = src[i++]; lit += b; } while (b === 255); }
+      out.set(src.subarray(i, i + lit), op); op += lit; i += lit;
+      if (i >= n) break;
+      const off = src[i] | (src[i + 1] << 8); i += 2;
+      let ml = tok & 15;
+      if (ml === 15) { let b; do { b = src[i++]; ml += b; } while (b === 255); }
+      ml += 4;
+      let from = op - off;
+      for (let k = 0; k < ml; k++) out[op++] = out[from++];
+    }
+    return op;
+  }
+
+  function decompress(u8) {
+    const magic = String.fromCharCode(...u8.subarray(0, 8));
+    if (magic !== "SNFHFZLC") throw new Error("not_w3_save");
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const count = dv.getUint32(8, true);
+    let total = 0;
+    for (let c = 0; c < count; c++) total += dv.getUint32(16 + c * 12 + 4, true);
+    const out = new Uint8Array(total + 64);
+    let op = 0, pos = dv.getUint32(12, true);
+    for (let c = 0; c < count; c++) {
+      // os blocos ficam em sequência; o 3º campo da tabela nem sempre bate com o arquivo
+      const cs = dv.getUint32(16 + c * 12, true);
+      op = lz4Block(u8.subarray(pos, pos + cs), out, op);
+      pos += cs;
+    }
+    return out.subarray(0, op);
+  }
+
+  const okChar = c => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 32 || c === 45;
+  function readFacts(b) {
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const facts = new Map();
+    const n = b.length;
+    for (let i = 0; i < n - 16; i++) {
+      const c = b[i];
+      if (c < 0x81) continue;
+      const s = i + 1, e = s + (c & 0x7f);
+      if (e + 4 >= n || b[e] !== 0 || b[e + 1] !== 0 || b[e + 3] !== 0) continue;
+      const cnt = b[e + 2];
+      if (cnt < 1 || cnt > 32) continue;
+      let ok = true;
+      for (let k = s; k < e; k++) if (!okChar(b[k])) { ok = false; break; }
+      if (!ok) continue;
+      let p = e + 4, maxT = -1, v = 0;
+      for (let k = 0; k < cnt; k++) {
+        if (p + 10 > n) { ok = false; break; }
+        const vv = dv.getInt16(p, true), t = dv.getFloat32(p + 2, true), x = dv.getFloat32(p + 6, true);
+        p += 10;
+        if (!(x === -1 || (x >= 0 && x < 1e9)) || !(t >= 0 && t < 1e8)) { ok = false; break; }
+        if (t >= maxT) { maxT = t; v = vv; }
+      }
+      if (!ok) continue;
+      let name = "";
+      for (let k = s; k < e; k++) name += String.fromCharCode(b[k]);
+      const prev = facts.get(name);
+      if (!prev || maxT > prev.t) facts.set(name, { v, t: maxT });
+    }
+    return facts;
+  }
+
+  const qs = (a, from, to) => { const r = []; for (let i = from; i <= to; i++) r.push(a + String(i).padStart(2, "0")); return r; };
+  // Horas por parte: estimativas da história principal (média de jogadores, sem extras).
+  const CONTENT = [
+    { key: "base", name: "The Witcher 3", dlc: "", segs: [
+      { title: "Prólogo", codes: ["q001", "q002"], h: 4 },
+      { title: "Velen", codes: qs("q1", 1, 11), h: 11, region: true },
+      { title: "Novigrad", codes: qs("q3", 1, 11), h: 13, region: true },
+      { title: "Skellige", codes: qs("q2", 1, 10), h: 9, region: true },
+      { title: "Kaer Morhen", codes: ["q401", "q402", "q403"], h: 6, doneFacts: ["q403_completed"] },
+      { title: "Reta final", codes: qs("q5", 1, 5), h: 8.5, doneFacts: ["q501_eredin_died"] },
+    ] },
+    { key: "hos", name: "The Witcher 3", dlc: "Hearts of Stone", segs: [
+      { title: "Missão de abertura", codes: ["q601"], h: 2 },
+      { title: "Primeiro desejo", codes: ["q602"], h: 2.5 },
+      { title: "Segundo desejo", codes: ["q603"], h: 2.5 },
+      { title: "Terceiro desejo", codes: ["q604"], h: 2 },
+      { title: "Desfecho", codes: ["q605"], h: 1, doneFacts: ["q605_mirror_won", "q605_mirror_lost", "q605_odimm_won", "q605_done", "q605_completed"] },
+    ] },
+    { key: "baw", name: "The Witcher 3", dlc: "Blood and Wine", segs: [
+      { title: "Parte 1", codes: ["q701"], h: 3 },
+      { title: "Parte 2", codes: ["q702"], h: 3.5 },
+      { title: "Parte 3", codes: ["q703"], h: 3.5 },
+      { title: "Parte 4", codes: ["q704"], h: 3 },
+      { title: "Parte 5", codes: ["q705"], h: 3 },
+    ] },
+  ];
+
+  const codeOf = name => { const m = /^(?:actor_|BookReadState_)?(q\d{3})[_ ]/i.exec(name); return m ? m[1].toLowerCase() : null; };
+  const pctile = (arr, p) => { const a = [...arr].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(a.length * p))]; };
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
+  function analyze(u8) {
+    const facts = readFacts(decompress(u8));
+    if (facts.size < 50) throw new Error("no_facts");
+    const byCode = new Map();
+    let now = 0;
+    for (const [name, f] of facts) {
+      if (f.t < 1e7 && /^(q\d|mq\d|sq\d|actor_|statistic_|BookReadState_)/i.test(name)) now = Math.max(now, f.t);
+      const c = codeOf(name);
+      if (!c) continue;
+      if (!byCode.has(c)) byCode.set(c, []);
+      byCode.get(c).push({ name, ...f });
+    }
+    // 1-2 facts soltos não contam (o jogo pré-marca algumas coisas), nem mortes/nocautes (actor_), que acontecem soltos pelo mapa
+    const started = c => (byCode.get(c) || []).filter(f => !/^actor_/i.test(f.name)).length >= 3;
+
+    const results = CONTENT.map(def => {
+      const segs = def.segs.map(sd => {
+        const fs = sd.codes.filter(started).flatMap(c => byCode.get(c));
+        const times = fs.map(f => f.t);
+        const doneFact = (sd.doneFacts || sd.codes.flatMap(c => [c + "_done", c + "_completed"])).some(n => facts.has(n));
+        return { ...sd, started: fs.length > 0, start: times.length ? pctile(times, .2) : null, end: times.length ? Math.max(...times) : null,
+          codesStarted: sd.codes.filter(started).length, doneFact };
+      });
+      // o que está feito
+      segs.forEach((s, i) => {
+        const later = segs.slice(i + 1);
+        if (s.region) s.done = s.doneFact || later.some(x => !x.region && x.started);
+        else s.done = s.doneFact || later.some(x => x.started);
+      });
+      // ritmo: duração real das partes concluídas / média
+      const ratios = [];
+      segs.forEach((s, i) => {
+        if (s.region || !s.done || !s.started) return;
+        const prev = segs[i - 1];
+        const st = (prev && prev.done && prev.end != null && !prev.region && prev.end <= s.end) ? Math.max(prev.end, Math.min(s.start, prev.end)) : s.start;
+        const dur = (s.end - st) / 3600;
+        if (dur > 0.05) ratios.push(dur / s.h);
+      });
+      return { def, segs, ratios };
+    });
+    // no jogo base as regiões se misturam, então o ritmo dele não é confiável; usa só as DLCs
+    results.forEach(r => { if (r.def.key === "base") r.ratios = []; });
+    const allRatios = results.flatMap(r => r.ratios);
+    const globalPace = allRatios.length ? clamp(allRatios.reduce((a, b) => a + b, 0) / allRatios.length, .25, 3) : 1;
+
+    const contents = results.map(({ def, segs, ratios }) => {
+      const pace = ratios.length ? clamp(ratios.reduce((a, b) => a + b, 0) / ratios.length, .25, 3) : globalPace;
+      segs.forEach((s, i) => {
+        if (s.done) s.frac = 1;
+        else if (!s.started) s.frac = 0;
+        else if (s.region) s.frac = clamp(s.codesStarted / s.codes.length, .05, .95);
+        else {
+          const prev = segs[i - 1];
+          const st = (prev && prev.done && prev.end != null && !prev.region && prev.end <= now) ? Math.min(s.start, prev.end) : s.start;
+          s.frac = clamp(((now - st) / 3600) / (s.h * pace), .05, .9);
+        }
+      });
+      const total = segs.reduce((a, s) => a + s.h, 0);
+      const got = segs.reduce((a, s) => a + s.h * s.frac, 0);
+      const anyStarted = segs.some(s => s.started || s.done);
+      const finished = segs.every(s => s.done);
+      return {
+        key: def.key, name: def.name, dlc: def.dlc,
+        status: finished ? "zerado" : anyStarted ? "andamento" : "nao_iniciado",
+        pct: finished ? 100 : (got / total) * 100, total, got, left: total - got, pace,
+        lastT: Math.max(0, ...segs.map(s => s.end || 0)),
+        segs: segs.map(s => ({ title: s.title, h: s.h, frac: s.frac, done: s.done, started: s.started })),
+      };
+    });
+    // conteúdo atual: o em andamento com atividade mais recente; senão o último zerado
+    const pick = st => contents.filter(c => c.status === st).sort((a, b) => b.lastT - a.lastT)[0];
+    const current = pick("andamento") || pick("zerado") || contents[0];
+    return { contents, current: current.key, playH: now / 3600, factCount: facts.size };
+  }
+
+  return { decompress, readFacts, analyze, CONTENT };
+})();
+/*W3CORE-END*/
+</script>
+
+<script>
+(() => {
+  const $app = document.getElementById("app");
+  const $status = document.getElementById("status");
+  const SAVE_DIR = "%USERPROFILE%\\Documents\\The Witcher 3\\gamesaves";
+  const lab = (g, k) => (g && g.labels && g.labels[k]) || LABEL[k] || k;
+  const LABEL = { bs: "Burning Shores", base: "História principal", hos: "Hearts of Stone", baw: "Blood and Wine", zbase: "História principal", ballad: "A Balada dos Campeões" };
+  const isBase = k => k === "base" || k === "zbase" || /^base/.test(k);
+  const KNOWN = ["w3", "botw"];
+  const W3_META = { id: "w3", name: "The Witcher 3", platform: "PC" };
+  const fmt1 = n => n.toLocaleString("pt-BR", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+  const fmtH = h => {
+    if (!isFinite(h) || h <= 0) return "0 h";
+    if (h < 1) return Math.max(1, Math.round(h * 60)) + " min";
+    return (h < 10 ? h.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) : Math.round(h).toString()) + " h";
+  };
+  const fmtDate = ms => new Date(ms).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const pctHTML = p => { const s = fmt1(p).split(","); return `${s[0]}<small>,${s[1]}%</small>`; };
+
+  let games = [];        // um documento por jogo
+  let docIds = [];       // tudo que existe no armazenamento (para limpar formatos antigos)
+  let view = { name: "list" };
+  let store = null;
+  let loaded = false;
+  let msg = "";
+  let hideNext = true;
+  try { hideNext = localStorage.getItem("zerometro.hide") !== "0"; } catch (e) {}
+
+  // ---------- trilha e parte atual ----------
+  const curIndex = segs => segs.findIndex(s => !s.done && s.frac < 1);
+  function trail(c, big) {
+    const ci = curIndex(c.segs);
+    const items = c.segs.map((s, i) => {
+      const cls = s.done || s.frac >= 1 ? "d" : (s.frac > 0 ? "c" : "");
+      return `<i class="${cls}" style="flex-grow:${s.h};--p:${Math.round(s.frac * 100)}%"></i>`;
+    }).join("");
+    return `<div class="trail${big ? " big" : ""}${c.status === "zerado" ? " full" : ""}" aria-hidden="true">${items}</div>`;
+  }
+  const curPart = c => { const i = curIndex(c.segs); return i >= 0 && c.status === "andamento" ? { i, s: c.segs[i] } : null; };
+
+  // ---------- leitura do save ----------
+  const readAsDataURL = f => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(f); });
+  async function importFiles(fileList) {
+    const files = [...fileList];
+    const savs = files.filter(f => /\.sav$/i.test(f.name)).sort((a, b) => b.lastModified - a.lastModified);
+    if (!savs.length) { msg = `<div class="note err">Escolha o arquivo que termina em <code>.sav</code>. O .json e o .png sozinhos não têm o progresso.</div>`; return render(); }
+    const file = savs[0];
+    msg = `<div class="note">Lendo ${esc(file.name)}…</div>`; render();
+    let r;
+    try { r = W3.analyze(new Uint8Array(await file.arrayBuffer())); }
+    catch (e) {
+      msg = `<div class="note err">${e && e.message === "not_w3_save"
+        ? "Esse arquivo não é um save do The Witcher 3 de PC. Pegue um .sav da pasta gamesaves."
+        : "Não consegui ler o progresso desse save. Tente um save mais recente."}</div>`;
+      return render();
+    }
+    const base = file.name.replace(/\.sav$/i, "");
+    const png = files.find(f => f.name.toLowerCase() === (base + ".png").toLowerCase());
+    let cover = null;
+    if (png && png.size < 180000) { try { cover = await readAsDataURL(png); } catch (e) {} }
+    if (await applyResult(r, { ...W3_META, saveFile: file.name, saveDate: file.lastModified, cover }, true)) { view = { name: "game", id: "w3" }; scrollTo(0, 0); }
+    render();
+  }
+
+  // guarda um resultado (vindo do arquivo escolhido ou do programa local); true = guardou
+  let saving = false;
+  async function applyResult(r, meta, force) {
+    if (!store || saving) { if (!store) msg = `<div class="note err">Ainda carregando. Tente de novo em alguns segundos.</div>`; return false; }
+    const old = games.find(g => g.id === meta.id);
+    const cover = meta.cover || (old && old.cover) || null;
+    const sig = cs => JSON.stringify((cs || []).map(c => [c.key, c.status, Math.round(c.pct * 10) / 10]));
+    if (!force && old && old.saveFile === meta.saveFile && old.saveDate === meta.saveDate && (old.cover || !cover) && sig(old.contents) === sig(r.contents)) return false;
+    const g = {
+      id: meta.id, name: meta.name, platform: meta.platform, saveFile: meta.saveFile, saveDate: meta.saveDate, cover,
+      labels: r.labels || null, source: r.source || "save",
+      current: r.current, playH: Math.round(r.playH * 10) / 10, updatedAt: Date.now(),
+      contents: r.contents.map(c => ({
+        key: c.key, status: c.status, pct: Math.round(c.pct * 10) / 10, total: c.total,
+        left: Math.round(c.left * 100) / 100, pace: Math.round(c.pace * 100) / 100, paceKnown: c.paceKnown !== false,
+        segs: c.segs.map(s => ({ title: s.title, h: s.h, frac: Math.round(s.frac * 100) / 100, done: !!s.done })),
+      })),
+    };
+    saving = true;
+    try {
+      await store.save(g);
+      // formato antigo: um cartão por campanha e jogos digitados à mão
+      if (!window.ZM_APP) for (const id of docIds) if (!KNOWN.includes(id)) { try { await store.remove(id); } catch (e) {} }
+    } catch (e) { msg = `<div class="note err">Li o save, mas não consegui guardar o resultado. Tente de novo.</div>`; saving = false; return false; }
+    saving = false;
+    const i = games.findIndex(x => x.id === g.id);
+    if (i >= 0) games[i] = g; else games.push(g);
+    msg = "";
+    return true;
+  }
+
+  // ---------- atualização automática (programa local "zerometro" no app do Claude) ----------
+  const HOST = "host:zerometro", TOOL = "ler_saves";
+  let mcp = null;
+  let auto = { state: "checking", at: 0, text: "" };  // checking | on | off | approval | error
+  function autoNote(st, text) { auto = { state: st, at: st === "on" ? Date.now() : auto.at, text: text || "" }; if (view.name === "list" || view.name === "game") render(); }
+  async function onAutoResult(res) {
+    const p = res && (res.payload || res.structuredContent);
+    const list = p && Array.isArray(p.games) ? p.games.filter(g => g && g.ok && (window.ZM_APP ? /^[\w-]{1,40}$/.test(g.id) : KNOWN.includes(g.id)) && Array.isArray(g.contents)) : [];
+    if (!list.length) { autoNote("error", "O programa não achou saves de nenhum jogo suportado no PC."); return; }
+    const before = new Set(games.map(g => g.id));
+    let added = null;
+    for (const r of list) {
+      if (await applyResult(r, { id: r.id, name: r.name, platform: r.platform, saveFile: r.saveFile, saveDate: r.saveDate, cover: r.cover }, false) && !before.has(r.id)) added = r.id;
+    }
+    autoNote("on");
+    if (added && !before.size) { view = { name: "game", id: added }; render(); }
+  }
+  function onAutoError(e) {
+    const code = e && e.code;
+    if (code === "server_not_connected" || code === "not_granted" || code === "capability_disabled" || code === "capability_removed" || code === "server_not_found")
+      autoNote("off", code);
+    else if (code === "approval_required" || code === "not_in_manifest") autoNote("approval");
+    else if (code === "tool_error") autoNote("error", "O programa não achou saves de nenhum jogo suportado no PC.");
+    else autoNote("error", "Não consegui falar com o programa agora. Ele tenta de novo no próximo minuto.");
+  }
+  async function refreshNow() {
+    if (!mcp) return;
+    autoNote("checking");
+    try { await onAutoResult(await mcp.callTool(HOST, TOOL, {}, { cache: false })); }
+    catch (e) { onAutoError(e); }
+  }
+  function startAuto() {
+    if (!mcp) { autoNote("off", "mcp_null"); return; }
+    mcp.watchTool(HOST, TOOL, {}, ev => { if (ev.type === "data") onAutoResult(ev.result); else onAutoError(ev.error); },
+      { refetchInterval: 60000, cache: { staleTime: 30000, gcTime: 600000 } });
+  }
+  const hhmm = ms => new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  function autoHTML() {
+    if (auto.state === "on") return `<span class="dot on"></span><span><strong>Atualização automática ligada.</strong> O save é verificado a cada minuto. Última verificação às ${hhmm(auto.at)}.</span><button class="btn" id="refreshNow">Atualizar agora</button>`;
+    if (auto.state === "checking") return `<span class="dot"></span><span>Verificando o save…</span>`;
+    if (auto.state === "approval") return `<span class="dot warn"></span><span>A leitura automática precisa da sua permissão.</span><button class="btn" id="refreshNow">Permitir e atualizar</button>`;
+    if (auto.state === "error") return `<span class="dot warn"></span><span>${esc(auto.text)}</span><button class="btn" id="refreshNow">Tentar de novo</button>`;
+    return `<span class="dot"></span><span>Atualização automática indisponível aqui. Ela só funciona com esta página aberta no app do Claude no PC. Por enquanto, escolha o save à mão.${auto.text ? ` <code>${esc(auto.text)}</code>` : ""}</span>${mcp ? `<button class="btn" id="refreshNow">Tentar conectar</button>` : ""}`;
+  }
+
+  function loaderHTML(big) {
+    const input = `<input type="file" id="saveFile" accept=".sav,.png" multiple>`;
+    if (!big) return `<div class="auto">${autoHTML()}</div><section class="loader slim" id="drop">
+        <p>${auto.state === "on" ? "Também dá para escolher um save específico à mão." : "Jogou mais? Escolha o save mais novo para atualizar a %."}</p>
+        <label class="btn" for="saveFile">Escolher save</label>${input}
+        ${msg ? `<div class="msg">${msg}</div>` : ""}
+      </section>`;
+    return `<div class="auto">${autoHTML()}</div><section class="loader big" id="drop">
+        <span class="kicker">Ler o progresso do save</span>
+        <h2>Escolha o save do jogo e veja quanto falta para zerar</h2>
+        <p>Abra a pasta de saves, escolha o arquivo <code>.sav</code> mais recente e, se quiser, o <code>.png</code> de mesmo nome para virar a capa. Também dá para arrastar os arquivos para cá.</p>
+        <div class="path"><span class="muted">Pasta:</span><code id="savePath">${esc(SAVE_DIR)}</code><button class="btn quiet" id="copyPath">Copiar</button></div>
+        <label class="btn main" for="saveFile">Escolher save</label>${input}
+        <div class="supported">Jogos suportados: <span class="chip">The Witcher 3 · PC · com as DLCs</span> <span class="chip">Zelda: Breath of the Wild · Savage Wind · leitura automática</span> <span class="chip">Horizon Forbidden West · Steam · com Burning Shores</span> <span class="chip">The Talos Principle 2 · Steam</span> <span class="chip">RV There Yet? · Steam · os 3 mapas</span></div>${window.ZM_APP ? `<p>Seu jogo não está na lista? Use <b>Gerar relatório</b> logo abaixo e mande o arquivo para quem te passou o app.</p>` : ""}
+        ${msg ? `<div class="msg">${msg}</div>` : ""}
+      </section>`;
+  }
+  function bindLoader() {
+    const d = document.getElementById("drop");
+    if (!d) return;
+    document.getElementById("saveFile").onchange = e => { if (e.target.files.length) importFiles(e.target.files); e.target.value = ""; };
+    d.ondragover = e => { e.preventDefault(); d.classList.add("over"); };
+    d.ondragleave = () => d.classList.remove("over");
+    d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); importFiles(e.dataTransfer.files); };
+    const cp = document.getElementById("copyPath");
+    if (cp) cp.onclick = async () => {
+      try { await navigator.clipboard.writeText(SAVE_DIR); cp.textContent = "Copiado"; }
+      catch (e) { const rg = document.createRange(); rg.selectNodeContents(document.getElementById("savePath")); getSelection().removeAllRanges(); getSelection().addRange(rg); cp.textContent = "Use Ctrl+C"; }
+      setTimeout(() => { cp.textContent = "Copiar"; }, 2000);
+    };
+  }
+  addEventListener("dragover", e => e.preventDefault());
+  addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) importFiles(e.dataTransfer.files); });
+
+  // ---------- telas ----------
+  function render() {
+    view.name === "game" && games.find(g => g.id === view.id) ? renderGame(games.find(g => g.id === view.id)) : renderList();
+    const rb = document.getElementById("refreshNow");
+    if (rb) rb.onclick = refreshNow;
+  }
+
+  function coverHTML(g, inner) {
+    return `<div class="cover">${g.cover ? `<img src="${esc(g.cover)}" alt="">` : ""}<div class="over">${inner}</div></div>`;
+  }
+
+  function renderList() {
+    view = { name: "list" };
+    if (!loaded) { $app.innerHTML = ""; return; }
+    if (!games.length) { $app.innerHTML = loaderHTML(true) + reportHTML(); bindLoader(); bindReport(); return; }
+    const cards = games.map(g => {
+      const cur = g.contents.find(c => c.key === g.current) || g.contents[0];
+      const rows = g.contents.map(c => `<div class="crow${c.key === g.current && c.status === "andamento" ? " cur" : ""}${c.status === "nao_iniciado" ? " idle" : ""}">
+          <span class="nm">${esc(lab(g, c.key))}</span>${trail(c)}<span class="pc">${c.status === "nao_iniciado" ? "—" : fmt1(c.pct) + "%"}</span></div>`).join("");
+      return `<button class="card" data-open="${esc(g.id)}">
+        ${coverHTML(g, `<div><div class="kicker">${esc(g.platform)} · ${esc(lab(g, cur.key))}</div><h2>${esc(g.name)}</h2></div>
+          <div class="pctbig">${cur.status === "zerado" ? "100" : fmt1(cur.pct)}<small>%</small><span>${cur.status === "zerado" ? "zerado" : "na campanha atual"}</span></div>`)}
+        <div class="rows">${rows}</div>
+        <div class="cardfoot">${g.source === "steam" ? "Pelas conquistas da Steam" : "Save de " + fmtDate(g.saveDate)}</div>
+      </button>`;
+    }).join("");
+    $app.innerHTML = loaderHTML(false) + `<div class="library">${cards}</div>` + reportHTML();
+    bindLoader();
+    bindReport();
+    $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { view = { name: "game", id: b.dataset.open }; render(); scrollTo(0, 0); });
+  }
+
+  // ---------- relatório para jogos que o app ainda não lê (só no aplicativo) ----------
+  // Ao abrir, lista todos os jogos da Steam instalados no PC, cada um com as pastas de save já encontradas.
+  const rep = { open: false, step: "list", steam: null, appid: "", name: "", folders: [], sel: new Set(), busy: false, err: "", result: null };
+  const fmtMB = b => (b / 1048576).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " MB";
+  const jpost = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+  function reportHTML() {
+    if (!window.ZM_APP) return "";
+    if (!rep.open) return `<section class="report"><div><h3>Seu jogo não aparece aqui?</h3>
+      <p class="muted">Gere um relatório com os saves do jogo e mande o arquivo para quem te passou o Zerômetro. Com ele dá para ensinar o app a ler esse jogo numa versão nova.</p></div>
+      <button class="btn" id="repOpen">Gerar relatório</button></section>`;
+    let body = "";
+    if (rep.step === "list") {
+      if (rep.steam === null) body = `<p class="muted">Procurando os jogos da Steam e os saves de cada um…</p>`;
+      else {
+        const rows = rep.steam.map((g, i) => `<button class="gamerow" data-g="${i}">
+            <span><b>${esc(g.name)}</b><small>${g.folders.length ? `Save encontrado · ${esc(g.folders[0].path)}` : "Save não encontrado: dá para escolher a pasta à mão"}</small></span>
+            <span class="dot ${g.folders.length ? "on" : "warn"}"></span></button>`).join("");
+        body = `<p>${rep.steam.length ? "Estes são os jogos da Steam instalados neste PC. Clique no jogo do relatório:" : "Não achei jogos da Steam instalados neste PC."}</p>
+          <div class="gamelist">${rows}</div>
+          <div class="row"><button class="btn" id="repOther">Outro jogo (fora da Steam)</button><button class="btn quiet" id="repClose">Cancelar</button></div>`;
+      }
+    } else if (rep.step === "other") {
+      body = `<label class="field"><span>Nome do jogo</span><input id="repName" value="${esc(rep.name)}" placeholder="Ex.: Horizon Forbidden West"></label>
+        <div class="row"><button class="btn main" id="repFind" ${rep.busy ? "disabled" : ""}>${rep.busy ? "Procurando…" : "Procurar os saves"}</button><button class="btn quiet" id="repBack">Voltar</button></div>`;
+    } else if (rep.step === "folders") {
+      const list = rep.folders.map((f, i) => `<label class="fold"><input type="checkbox" data-f="${i}" ${rep.sel.has(f.path) ? "checked" : ""}>
+          <span><code>${esc(f.path)}</code><small>${f.files ? `${f.files} arquivos · ${fmtMB(f.size)} · alterado em ${fmtDate(f.newest)}` : "escolhida à mão"}</small></span></label>`).join("");
+      body = `<p><b>${esc(rep.name)}</b>: ${rep.folders.length ? "estas são as pastas de save encontradas. Na dúvida, deixe marcadas." : "não achei a pasta de saves sozinho. Escolha a pasta à mão. Dica: procure o nome do jogo em Documentos, em Jogos Salvos ou em %LOCALAPPDATA%."}</p>
+        <div class="folds">${list}</div>
+        <div class="row"><button class="btn" id="repPick">Escolher outra pasta…</button></div>
+        <p class="muted small">O relatório leva os arquivos dessas pastas (até 60 MB) e, se for jogo da Steam, a lista de conquistas. Os saves podem ter o seu nome de usuário do jogo. Nada é enviado sozinho: o arquivo fica na sua Área de Trabalho.</p>
+        <div class="row"><button class="btn main" id="repBuild" ${rep.busy || (!rep.sel.size && !rep.appid) ? "disabled" : ""}>${rep.busy ? "Gerando…" : "Gerar relatório"}</button><button class="btn quiet" id="repBack">Voltar</button></div>`;
+    } else if (rep.step === "done") {
+      const r = rep.result;
+      body = `<div class="note">Relatório pronto na sua Área de Trabalho: <code>${esc(r.path.split("\\").pop())}</code> (${fmtMB(r.size)}).${r.skipped ? ` ${r.skipped} arquivo(s) grandes ficaram de fora.` : ""}</div>
+        <p>Agora mande esse arquivo para quem te passou o Zerômetro (pelo Discord ou WhatsApp, por exemplo).</p>
+        <div class="row"><button class="btn main" id="repShow">Mostrar o arquivo</button><button class="btn quiet" id="repClose">Fechar</button></div>`;
+    }
+    return `<section class="report open"><h3>Gerar relatório de um jogo</h3>${rep.err ? `<div class="note err">${esc(rep.err)}</div>` : ""}${body}</section>`;
+  }
+  function bindReport() {
+    const $ = id => document.getElementById(id);
+    const redraw = () => { const sc = scrollY; render(); scrollTo(0, sc); };
+    const loadSteam = async () => {
+      try { rep.steam = (await (await fetch("/api/steam-games")).json()).games || []; } catch (e) { rep.steam = []; rep.err = "Não consegui ler a lista de jogos da Steam."; }
+      redraw();
+    };
+    const useFolders = (name, appid, folders) => {
+      Object.assign(rep, { name, appid: appid || "", folders, step: "folders", err: "" });
+      rep.sel = new Set(folders.filter(f => f.score >= .5).map(f => f.path));
+      redraw();
+    };
+    if ($("repOpen")) $("repOpen").onclick = () => {
+      Object.assign(rep, { open: true, step: "list", err: "", result: null }); redraw();
+      if (rep.steam === null) loadSteam();
+    };
+    $app.querySelectorAll("[data-g]").forEach(b => b.onclick = () => { const g = rep.steam[+b.dataset.g]; useFolders(g.name, g.appid, g.folders); });
+    if ($("repOther")) $("repOther").onclick = () => { Object.assign(rep, { step: "other", appid: "", name: "", err: "" }); redraw(); };
+    if ($("repClose")) $("repClose").onclick = () => { rep.open = false; redraw(); };
+    if ($("repBack")) $("repBack").onclick = () => { rep.step = rep.appid ? "list" : (rep.step === "folders" ? "other" : "list"); rep.err = ""; redraw(); };
+    if ($("repName")) $("repName").oninput = e => { rep.name = e.target.value; };
+    if ($("repFind")) $("repFind").onclick = async () => {
+      if (!rep.name.trim()) { rep.err = "Escreva o nome do jogo."; return redraw(); }
+      rep.busy = true; rep.err = ""; redraw();
+      try { const r = await jpost("/api/report/find", { name: rep.name, appid: null }); rep.busy = false; useFolders(rep.name, null, r.folders || []); }
+      catch (e) { rep.busy = false; rep.err = "Não consegui procurar as pastas. Tente de novo."; redraw(); }
+    };
+    $app.querySelectorAll("[data-f]").forEach(c => c.onchange = () => { const p = rep.folders[+c.dataset.f].path; c.checked ? rep.sel.add(p) : rep.sel.delete(p); redraw(); });
+    if ($("repPick")) $("repPick").onclick = async () => {
+      try {
+        const r = await (await fetch("/api/report/pick")).json();
+        if (r.folder && !rep.folders.some(f => f.path === r.folder)) rep.folders.push({ path: r.folder, files: 0, size: 0, newest: Date.now(), score: 1 });
+        if (r.folder) rep.sel.add(r.folder);
+      } catch (e) {}
+      redraw();
+    };
+    if ($("repBuild")) $("repBuild").onclick = async () => {
+      rep.busy = true; rep.err = ""; redraw();
+      try {
+        const r = await jpost("/api/report/build", { name: rep.name || "jogo", appid: rep.appid || null, folders: [...rep.sel] });
+        if (!r.ok) throw new Error(r.erro);
+        rep.result = r; rep.step = "done";
+      } catch (e) { rep.err = "Não consegui gerar o relatório" + (e && e.message ? ": " + e.message : "."); }
+      rep.busy = false; redraw();
+    };
+    if ($("repShow")) $("repShow").onclick = () => jpost("/api/report/show", { path: rep.result.path });
+  }
+
+
+  function campHTML(g, c, isCur) {
+    const cp = curPart(c);
+    const pill = c.status === "zerado" ? `<span class="pill win">Zerado</span>` : c.status === "andamento" ? `<span class="pill go">Em andamento</span>` : `<span class="pill">Não começou</span>`;
+    const pk = c.paceKnown !== false;
+    const kv = c.status === "zerado" ? `Concluída · cerca de <b>${fmtH(c.total)}</b> de história`
+      : c.status === "nao_iniciado" ? `Cerca de <b>${fmtH(c.total)}</b> de história${pk ? ` · <b>~${fmtH(c.total * c.pace)}</b> no seu ritmo` : ""}`
+      : `Faltam <b>~${fmtH(c.left)}</b> na média${pk ? ` · <b>~${fmtH(c.left * c.pace)}</b> no seu ritmo` : ""}`;
+    const parts = c.segs.map((s, i) => {
+      const st = s.done || s.frac >= 1 ? "d" : (cp && cp.i === i ? "c" : "");
+      const spoil = hideNext && !isBase(c.key) && !st && c.status !== "zerado";
+      return `<li class="part ${st}" style="--p:${Math.round(s.frac * 100)}%">
+        <span class="mk" aria-hidden="true"></span>
+        <span class="t"><span class="${spoil ? "spoiler" : ""}"${spoil ? ' data-reveal title="Clique para revelar"' : ""}>${esc(s.title)}</span>${st === "c" ? `<small>Você está aqui · cerca de ${Math.round(s.frac * 100)}% feito</small>` : ""}</span>
+        <span class="h">${fmtH(s.h)}</span></li>`;
+    }).join("");
+    return `<section class="camp${isCur ? " cur" : ""}">
+      <header><div><div class="kicker">${isBase(c.key) ? "Jogo base" : "DLC"}</div><h3>${esc(lab(g, c.key))}</h3></div>${pill}</header>
+      <div class="stats"><div class="p">${c.status === "nao_iniciado" ? "0<small>%</small>" : pctHTML(c.pct)}</div><div class="kv">${kv}</div></div>
+      ${trail(c, true)}
+      <div class="legend"><span>Início</span><span>Final</span></div>
+      <details ${isCur ? "open" : ""}><summary>Partes da história (${c.segs.length})</summary><ol class="parts">${parts}</ol></details>
+    </section>`;
+  }
+
+  function renderGame(g) {
+    const cur = g.contents.find(c => c.key === g.current) || g.contents[0];
+    const cp = curPart(cur);
+    const now = cur.status === "andamento"
+      ? `<div class="where">Você está em <strong>${esc(lab(g, cur.key))}</strong>${cp ? `, parte ${cp.i + 1} de ${cur.segs.length}` : ""}.</div>
+         <div class="eta"><span class="kicker">Para zerar ${isBase(cur.key) ? "a história" : "esta DLC"}</span><b>~${fmtH(cur.left * cur.pace)}</b><span class="muted">${cur.paceKnown === false ? "na média dos jogadores" : `no seu ritmo (${cur.pace < 1 ? fmt1(1 / cur.pace) + "× mais rápido" : fmt1(cur.pace) + "× mais devagar"} que a média)`}</span></div>`
+      : `<div class="where">Tudo que você começou está <strong>zerado</strong>.</div><div class="eta"></div>`;
+    $app.innerHTML = `<div class="detail">
+      <div class="auto">${autoHTML()}</div>
+      <div class="dtop"><button class="btn quiet" id="back">← Biblioteca</button>
+        <label class="toggle"><input type="checkbox" id="hide" ${hideNext ? "checked" : ""}> Esconder nomes das próximas partes</label></div>
+      <section class="banner">
+        ${coverHTML(g, `<div><div class="kicker">${esc(g.platform)} · ${g.source === "steam" ? "pelas conquistas da Steam" : "save de " + fmtDate(g.saveDate)}</div><h2>${esc(g.name)}</h2></div>`)}
+        <div class="now">${now}</div>
+      </section>
+      ${g.contents.map(c => campHTML(g, c, c.key === cur.key && cur.status === "andamento")).join("")}
+      <div id="removeBox" class="actions"><button class="btn quiet danger" id="remove">Remover jogo</button></div>
+    </div>`;
+    document.getElementById("back").onclick = () => { view = { name: "list" }; render(); };
+    document.getElementById("hide").onchange = e => { hideNext = e.target.checked; try { localStorage.setItem("zerometro.hide", hideNext ? "1" : "0"); } catch (x) {} render(); };
+    $app.querySelectorAll("[data-reveal]").forEach(s => s.onclick = () => { s.classList.remove("spoiler"); s.removeAttribute("data-reveal"); });
+    document.getElementById("remove").onclick = () => {
+      const box = document.getElementById("removeBox");
+      box.innerHTML = `<div class="note confirm">Remover ${esc(g.name)} da biblioteca? O save do jogo não é afetado. <button class="btn danger" id="yes">Remover</button><button class="btn quiet" id="no">Cancelar</button></div>`;
+      document.getElementById("no").onclick = () => render();
+      document.getElementById("yes").onclick = async () => { try { await store.remove(g.id); } catch (e) {} games = games.filter(x => x.id !== g.id); view = { name: "list" }; render(); };
+    };
+  }
+
+  // ---------- armazenamento ----------
+  const LS = "zerometro.v2";
+  function localStore() {
+    try { games = JSON.parse(localStorage.getItem(LS) || "[]"); } catch (e) { games = []; }
+    docIds = games.map(g => g.id);
+    const persist = () => { try { localStorage.setItem(LS, JSON.stringify(games)); } catch (e) {} };
+    return { save: async g => { const i = games.findIndex(x => x.id === g.id); if (i >= 0) games[i] = g; else games.push(g); persist(); },
+             remove: async id => { games = games.filter(x => x.id !== id); persist(); } };
+  }
+
+  async function init() {
+    const use = n => (window.claude && window.claude.use) ? window.claude.use(n).catch(() => null) : Promise.resolve(null);
+    const [db, user, m] = await Promise.all([use("db"), use("user"), use("mcp")]);
+    mcp = m;
+    let id = null;
+    try { id = user ? await user.id() : null; } catch (e) {}
+    if (db && id) {
+      const col = db.collection("data/users/" + id);
+      store = { save: g => { const { id: gid, ...body } = g; return col.doc(gid).set(body); }, remove: gid => col.doc(gid).delete() };
+      const timer = setTimeout(() => { $status.textContent = "Ainda conectando à sua biblioteca…"; }, 10000);
+      col.onSnapshot(snap => {
+        docIds = snap.docs.map(d => d.id);
+        games = snap.docs.map(d => ({ id: d.id, ...structuredClone(d.data()) })).filter(g => Array.isArray(g.contents));
+        if (!snap.metadata.fromCache) { clearTimeout(timer); $status.textContent = window.ZM_APP ? "Biblioteca salva neste PC" : "Biblioteca salva na sua conta"; }
+        const firstLoad = !loaded;
+        loaded = true; render();
+        if (firstLoad) startAuto();
+      }, () => { clearTimeout(timer); $status.textContent = "Não foi possível carregar sua biblioteca agora."; loaded = true; render(); });
+    } else {
+      store = localStore();
+      loaded = true;
+      $status.textContent = "Salvo só neste navegador";
+      render();
+      startAuto();
+    }
+  }
+  render();
+  init();
+})();
+</script>
