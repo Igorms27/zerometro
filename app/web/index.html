@@ -155,6 +155,10 @@ details[open] summary::before { transform: rotate(90deg); }
 .dot.on { background: var(--cur); box-shadow: 0 0 0 4px var(--cur-soft); }
 .dot.warn { background: var(--gold); }
 .foot { margin-top: 30px; font-size: 13px; color: var(--muted); max-width: 72ch; }
+.readerr { margin-top: 18px; background: var(--surface); border: 1px solid var(--danger); border-radius: var(--r); padding: 14px 18px; display: flex; gap: 12px 20px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.readerr > div { flex: 1 1 320px; min-width: 0; }
+.readerr h3 { font-size: 16px; margin-bottom: 4px; color: var(--danger); }
+.readerr p { margin: 0; }
 .report { margin-top: 26px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 20px; display: flex; gap: 14px 20px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
 .report > div { flex: 1 1 320px; min-width: 0; }
 .report h3 { font-size: 18px; margin-bottom: 4px; }
@@ -205,7 +209,7 @@ window.ZM_APP = true;
     }),
     onSnapshot: (cb, err) => { listeners.push(cb); api("/api/library").then(r => { lib = r.games || {}; emit(); }).catch(e => err && err(e)); return () => {}; },
   }) };
-  const scan = async () => { const r = await api("/api/scan"); if (!r.ok) throw { code: "tool_error" }; return { structuredContent: { ok: true, games: r.games.map(g => ({ ...g, ok: true })) } }; };
+  const scan = async () => { const r = await api("/api/scan"); if (!r.ok) throw { code: "tool_error" }; window.ZM_ERRORS = r.erros || []; return { structuredContent: { ok: true, games: r.games.map(g => ({ ...g, ok: true })) } }; };
   const mcp = {
     callTool: () => scan(),
     watchTool: (h, t, a, cb, opt) => {
@@ -524,7 +528,7 @@ const W3 = (() => {
   async function onAutoResult(res) {
     const p = res && (res.payload || res.structuredContent);
     const list = p && Array.isArray(p.games) ? p.games.filter(g => g && g.ok && (window.ZM_APP ? /^[\w-]{1,40}$/.test(g.id) : KNOWN.includes(g.id)) && Array.isArray(g.contents)) : [];
-    if (!list.length) { autoNote("error", "O programa não achou saves de nenhum jogo suportado no PC."); return; }
+    if (!list.length) { autoNote("error", window.ZM_ERRORS && window.ZM_ERRORS.length ? "Achei saves, mas não consegui ler (veja o aviso abaixo)." : "O programa não achou saves de nenhum jogo suportado no PC."); return; }
     const before = new Set(games.map(g => g.id));
     let added = null;
     for (const r of list) {
@@ -609,7 +613,7 @@ const W3 = (() => {
   function renderList() {
     view = { name: "list" };
     if (!loaded) { $app.innerHTML = ""; return; }
-    if (!games.length) { $app.innerHTML = loaderHTML(true) + reportHTML(); bindLoader(); bindReport(); return; }
+    if (!games.length) { $app.innerHTML = loaderHTML(true) + readErrorsHTML() + reportHTML(); bindLoader(); bindReport(); return; }
     const cards = games.map(g => {
       const cur = g.contents.find(c => c.key === g.current) || g.contents[0];
       const rows = g.contents.map(c => `<div class="crow${c.key === g.current && c.status === "andamento" ? " cur" : ""}${c.status === "nao_iniciado" ? " idle" : ""}">
@@ -621,7 +625,7 @@ const W3 = (() => {
         <div class="cardfoot">${g.source === "steam" ? "Pelas conquistas da Steam" : "Save de " + fmtDate(g.saveDate)}</div>
       </button>`;
     }).join("");
-    $app.innerHTML = loaderHTML(false) + `<div class="library">${cards}</div>` + reportHTML();
+    $app.innerHTML = loaderHTML(false) + `<div class="library">${cards}</div>` + readErrorsHTML() + reportHTML();
     bindLoader();
     bindReport();
     $app.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { view = { name: "game", id: b.dataset.open }; render(); scrollTo(0, 0); });
@@ -632,6 +636,13 @@ const W3 = (() => {
   const rep = { open: false, step: "list", steam: null, appid: "", name: "", folders: [], sel: new Set(), busy: false, err: "", result: null };
   const fmtMB = b => (b / 1048576).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " MB";
   const jpost = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+  // jogos cujo save existe mas o app não conseguiu ler (vem do /api/scan)
+  function readErrorsHTML() {
+    const errs = window.ZM_APP && Array.isArray(window.ZM_ERRORS) ? window.ZM_ERRORS : [];
+    return errs.map(e => `<section class="readerr"><div><h3>${esc(e.name)}: não consegui ler o save</h3>
+      <p class="muted">${esc(e.erro)} Gere um relatório e mande o arquivo para quem te passou o Zerômetro.</p></div>
+      <button class="btn" data-errrep="${esc(e.appid || "")}">Gerar relatório</button></section>`).join("");
+  }
   function reportHTML() {
     if (!window.ZM_APP) return "";
     if (!rep.open) return `<section class="report"><div><h3>Seu jogo não aparece aqui?</h3>
@@ -679,6 +690,13 @@ const W3 = (() => {
       rep.sel = new Set(folders.filter(f => f.score >= .5).map(f => f.path));
       redraw();
     };
+    // aviso "achei o save mas não consegui ler": abre o relatório já com esse jogo escolhido (se for da Steam)
+    $app.querySelectorAll("[data-errrep]").forEach(b => b.onclick = async () => {
+      Object.assign(rep, { open: true, step: "list", err: "", result: null }); redraw();
+      if (rep.steam === null) await loadSteam();
+      const g = (rep.steam || []).find(x => String(x.appid) === b.dataset.errrep);
+      if (g) useFolders(g.name, g.appid, g.folders);
+    });
     if ($("repOpen")) $("repOpen").onclick = () => {
       Object.assign(rep, { open: true, step: "list", err: "", result: null }); redraw();
       if (rep.steam === null) loadSteam();

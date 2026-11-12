@@ -3,6 +3,7 @@
 Cada jogo aqui diz quais conquistas fecham cada parte da história. Uma parte conta como feita
 quando qualquer uma das conquistas dela foi desbloqueada.
 """
+from . import base as common
 from . import steam
 
 # appid -> definição. Para adicionar um jogo: veja o schema no relatório e liste as conquistas de história.
@@ -43,12 +44,7 @@ def analyze(appid):
                 for s in segs[:i]:
                     s["done"], s["frac"] = True, 1.0
                 break
-        total = sum(s["h"] for s in segs)
-        got = sum(s["h"] * s["frac"] for s in segs)
-        fin = all(s["done"] for s in segs)
-        contents.append(dict(key=key, status="zerado" if fin else ("andamento" if got else "nao_iniciado"),
-                             pct=round(100.0 if fin else got / total * 100, 1), total=total, left=round(total - got, 2),
-                             pace=1.0, paceKnown=False, segs=segs))
+        contents.append(common.build_content(key, segs))
     cur = max(contents, key=lambda c: (c["status"] == "andamento", last.get(c["key"], 0)))
     stamp = max(last.values()) if last else 0
     return dict(current=cur["key"], playH=0, contents=contents, saveFile="conquistas da Steam",

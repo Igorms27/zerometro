@@ -1,10 +1,9 @@
 """The Witcher 3 (PC): descomprime o .sav (LZ4) e lê os "facts" das missões."""
-import base64
-import glob
 import os
 import re
 import struct
 
+from . import base as common
 from . import paths
 
 ID, NAME, PLATFORM = "w3", "The Witcher 3", "PC"
@@ -185,16 +184,10 @@ def analyze(raw_save):
                 prev = segs[i - 1] if i > 0 else None
                 st = min(s["start"], prev["end"]) if (prev and prev["done"] and prev["end"] is not None and not prev.get("region") and prev["end"] <= now) else s["start"]
                 s["frac"] = clamp(((now - st) / 3600) / (s["h"] * pace), .05, .9)
-        total = sum(s["h"] for s in segs)
-        got = sum(s["h"] * s["frac"] for s in segs)
-        finished = all(s["done"] for s in segs)
-        any_started = any(s["started"] or s["done"] for s in segs)
-        contents.append(dict(
-            key=key, status="zerado" if finished else ("andamento" if any_started else "nao_iniciado"),
-            pct=round(100.0 if finished else got / total * 100, 1), total=total,
-            left=round(total - got, 2), pace=round(pace, 2),
-            lastT=max([0] + [s["end"] or 0 for s in segs]),
-            segs=[dict(title=s["title"], h=s["h"], frac=round(s["frac"], 2), done=bool(s["done"])) for s in segs]))
+        contents.append(common.build_content(
+            key, segs, finished=all(s["done"] for s in segs),
+            started=any(s["started"] or s["done"] for s in segs),
+            pace=round(pace, 2), pace_known=None, lastT=max([0] + [s["end"] or 0 for s in segs])))
 
     def pick(st):
         c = sorted([c for c in contents if c["status"] == st], key=lambda c: -c["lastT"])
@@ -207,22 +200,15 @@ def analyze(raw_save):
 
 
 def latest(cache):
-    files = []
-    for d in save_dirs():
-        files += glob.glob(os.path.join(d, "*.sav"))
-    if not files:
+    found = common.find_latest(save_dirs(), "*.sav")
+    if not found:
         return None
-    path = max(files, key=os.path.getmtime)
-    mtime = os.path.getmtime(path)
-    key = (ID, path, mtime)
-    if key not in cache:
+    path, mtime = found
+
+    def compute():
         with open(path, "rb") as f:
             res = analyze(f.read())
-        cover = None
-        png = os.path.splitext(path)[0] + ".png"
-        if os.path.exists(png) and os.path.getsize(png) < 180000:
-            with open(png, "rb") as f:
-                cover = "data:image/png;base64," + base64.b64encode(f.read()).decode()
-        res.update(saveFile=os.path.basename(path), saveDate=int(mtime * 1000), cover=cover, source="save")
-        cache[key] = res
-    return cache[key]
+        res.update(saveFile=os.path.basename(path), saveDate=int(mtime * 1000),
+                   cover=common.cover_from(os.path.splitext(path)[0] + ".png"), source="save")
+        return res
+    return common.cached(cache, (ID, path, mtime), compute)
