@@ -7,8 +7,10 @@ import json
 import os
 import platform
 import re
+import time
 import zipfile
 
+import anonymize
 from readers import paths, steam
 
 MAX_TOTAL = 60 * 1024 * 1024     # tamanho máximo dos saves dentro do .zip
@@ -195,8 +197,12 @@ def build(name, appid, folders, app_version):
     safe = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-")[:40] or "jogo"
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
     out = os.path.join(_desktop(), "Zerometro-relatorio-%s-%s.zip" % (safe, stamp))
+    # dados pessoais saem do relatório: usuário do Windows nos caminhos, ID da conta Steam, log (ver anonymize.py)
+    an = anonymize.Anon(account_ids=anonymize.steam_accounts(steam.steam_root()))
     manifest = dict(app_version=app_version, created=stamp, game=name, appid=appid,
-                    windows=platform.platform(), folders=[], skipped=[], steam={})
+                    windows=platform.platform(), folders=[], skipped=[], steam={}, steamid_no_conteudo=[],
+                    anonimizado="caminhos do usuario -> %USERPROFILE%; ID Steam trocado por STEAMID_xxxxxx; "
+                                "log filtrado; conteudo de saves binarios nao foi alterado")
     total = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for i, folder in enumerate(folders):
@@ -214,34 +220,47 @@ def build(name, appid, folders, app_version):
             listing = []
             for mtime, size, p in files:
                 rel = os.path.relpath(p, folder)
+                shown = an.path(rel)
                 head = ""
                 try:
                     with open(p, "rb") as fh:
-                        head = fh.read(64).hex()
+                        head = an.head_hex(fh.read(64))
                 except OSError:
                     pass
-                listing.append(dict(file=rel, size=size, mtime=int(mtime), head=head))
+                listing.append(dict(file=shown, size=size, mtime=int(mtime), head=head))
                 if os.path.splitext(p)[1].lower() in SKIP_EXT or size > MAX_FILE or total + size > MAX_TOTAL:
-                    manifest["skipped"].append(dict(folder=i, file=rel, size=size))
+                    manifest["skipped"].append(dict(folder=i, file=shown, size=size))
                     continue
                 try:
-                    z.write(p, "saves/%d/%s" % (i, rel.replace(os.sep, "/")))
+                    with open(p, "rb") as fh:
+                        data = fh.read()
+                    data, _changed = an.file_content(p, data)
+                    if _changed is False and an.has_id(data):
+                        manifest["steamid_no_conteudo"].append(dict(folder=i, file=shown))
+                    zi = zipfile.ZipInfo("saves/%d/%s" % (i, shown.replace("\\", "/")), date_time=max(time.localtime(mtime)[:6], (1980, 1, 1, 0, 0, 0)))
+                    zi.compress_type = zipfile.ZIP_DEFLATED  # mantém a data do arquivo, útil para ver qual save é o mais novo
+                    z.writestr(zi, data)
                     total += size
                 except OSError:
-                    manifest["skipped"].append(dict(folder=i, file=rel, size=size, erro="sem acesso"))
-            manifest["folders"].append(dict(index=i, path=folder, files=listing))
+                    manifest["skipped"].append(dict(folder=i, file=shown, size=size, erro="sem acesso"))
+            manifest["folders"].append(dict(index=i, path=an.path(folder), files=listing))
         if appid:
             schema, users = steam.stats_files(appid)
             for p in ([schema] if schema else []) + users:
-                z.write(p, "steam/" + os.path.basename(p))
+                z.write(p, "steam/" + an.path(os.path.basename(p)))
             try:
                 ach = steam.achievements(appid) or {}
                 manifest["steam"] = dict(total=len(ach), unlocked=sum(a["unlocked"] for a in ach.values()))
                 z.writestr("steam/conquistas.json", json.dumps(ach, ensure_ascii=False, indent=1))
             except Exception as e:
-                manifest["steam"] = dict(erro=str(e))
+                manifest["steam"] = dict(erro=an.log_line(str(e)))
         log = paths.data_path("zerometro.log")
         if os.path.exists(log):
-            z.write(log, "zerometro.log")
+            try:
+                with open(log, encoding="utf-8", errors="replace") as fh:
+                    z.writestr("zerometro.log", an.log(fh.read()))
+            except OSError:
+                pass
+        manifest["steam_ids_trocados"] = len(an.seen)
         z.writestr("relatorio.json", json.dumps(manifest, ensure_ascii=False, indent=1))
     return dict(path=out, size=os.path.getsize(out), saved=total, skipped=len(manifest["skipped"]))
