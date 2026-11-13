@@ -31,4 +31,4 @@ O app se atualiza sozinho. Quando sai uma versão nova, ele baixa ao abrir e ped
 
 ## Privacidade
 
-Os saves são lidos só no seu PC. A única conexão com a internet é para conferir se existe versão nova aqui no GitHub.
+Os saves são lidos só no seu PC. O app só usa a internet para duas coisas, ambas no GitHub: conferir se existe versão nova e baixar a lista de jogos por conquistas (`games.json`, só dados, nunca código). Para desligar o segundo download, crie o arquivo `%APPDATA%\Zerometro\settings.json` com `{"baixar_mapa": false}`; o app passa a usar só a lista que já vem dentro dele.

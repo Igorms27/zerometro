@@ -21,10 +21,10 @@ MAX_BYTES = 256 * 1024
 TIMEOUT = 10
 # limites: um arquivo estragado não pode travar o app nem encher a tela
 MAX_GAMES, MAX_CONTENTS, MAX_SEGS, MAX_ACH = 200, 8, 80, 12
-_APPID = re.compile(r"^\d{1,10}$")
-_ID = re.compile(r"^[a-z0-9_-]{1,32}$")
-_KEY = re.compile(r"^[a-z0-9_-]{1,24}$")
-_ACH = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+_APPID = re.compile(r"[0-9]{1,10}")
+_ID = re.compile(r"[a-z0-9_-]{1,32}")
+_KEY = re.compile(r"[a-z0-9_-]{1,24}")
+_ACH = re.compile(r"[A-Za-z0-9_.:-]{1,80}")  # sempre com fullmatch ("$" aceitaria um \n no fim)
 
 
 def _str(v, n):
@@ -39,14 +39,14 @@ def _segment(d):
     if not isinstance(d, dict) or not _str(d.get("title"), 80) or not _num(d.get("h")):
         return None
     ach = d.get("ach")
-    if not isinstance(ach, list) or not (0 < len(ach) <= MAX_ACH) or not all(isinstance(a, str) and _ACH.match(a) for a in ach):
+    if not isinstance(ach, list) or not (0 < len(ach) <= MAX_ACH) or not all(isinstance(a, str) and _ACH.fullmatch(a) for a in ach):
         return None
     return dict(title=d["title"].strip(), h=d["h"], ach=list(ach))
 
 
 def _game(g):
     """Jogo válido no formato interno de by_achievements.GAMES, ou None."""
-    if not isinstance(g, dict) or not _ID.match(str(g.get("id", ""))) or not _str(g.get("name"), 80):
+    if not isinstance(g, dict) or not isinstance(g.get("id"), str) or not _ID.fullmatch(g["id"]) or not _str(g.get("name"), 80):
         return None
     platform = g.get("platform", "PC · Steam")
     if not _str(platform, 40):
@@ -56,7 +56,7 @@ def _game(g):
         return None
     contents, seen = [], set()
     for c in raw_contents:
-        if not isinstance(c, dict) or not _KEY.match(str(c.get("key", ""))) or c["key"] in seen:
+        if not isinstance(c, dict) or not isinstance(c.get("key"), str) or not _KEY.fullmatch(c["key"]) or c["key"] in seen:
             return None
         segs = c.get("segs")
         if not isinstance(segs, list) or not (0 < len(segs) <= MAX_SEGS):
@@ -81,7 +81,7 @@ def validate(data):
         return {}
     out, ids = {}, set()
     for appid, g in list(games.items())[:MAX_GAMES]:
-        ok = _game(g) if isinstance(appid, str) and _APPID.match(appid) else None
+        ok = _game(g) if isinstance(appid, str) and _APPID.fullmatch(appid) else None
         if not ok or ok["id"] in ids:
             log.warning("games.json: entrada %r ignorada (inválida)", str(appid)[:20])
             continue
@@ -138,8 +138,16 @@ def fetch(url=URL, timeout=TIMEOUT):
     return games, (raw if games else None)
 
 
+def download_enabled():
+    """A pessoa desliga o download com {"baixar_mapa": false} em %APPDATA%\\Zerometro\\settings.json."""
+    s = paths.settings()
+    return not (isinstance(s, dict) and s.get("baixar_mapa") is False)
+
+
 def refresh(url=URL, timeout=TIMEOUT):
     """Baixa o mapa e, se vier válido, guarda no cache e devolve o mapa completo (embutido + novo). Senão None."""
+    if not download_enabled():
+        return None
     games, raw = fetch(url, timeout)
     if not raw:
         return None

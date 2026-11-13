@@ -26,7 +26,7 @@ def scan():
                 r = dict(r, cover=covers.url(getattr(mod, "STEAM_APPID", None)))
             games.append(dict(r, id=mod.ID, name=mod.NAME, platform=mod.PLATFORM, labels=mod.LABELS))
             done_ids.add(mod.ID)
-    for appid, g in by_achievements.GAMES.items():
+    for appid, g in list(by_achievements.GAMES.items()):
         if g["id"] in done_ids:
             continue
         try:

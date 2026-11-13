@@ -13,10 +13,10 @@ GAMES = gamedata.load()
 
 def refresh():
     """Baixa o games.json mais novo e troca o mapa na memória. Sem rede ou arquivo inválido: nada muda."""
+    global GAMES
     new = gamedata.refresh()
     if new:
-        GAMES.clear()
-        GAMES.update(new)
+        GAMES = new  # troca de uma vez: quem está percorrendo o dict antigo não é afetado
     return bool(new)
 
 
