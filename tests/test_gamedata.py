@@ -10,8 +10,8 @@ GOOD = {"id": "g1", "name": "Jogo", "platform": "PC · Steam", "labels": {"base"
         "contents": [{"key": "base", "segs": [{"title": "A", "h": 2, "ach": ["X"]}, {"title": "B", "h": 3.5, "ach": ["Y", "Z"]}]}]}
 
 
-def doc(**games):
-    return {"schema": 1, "games": games}
+def doc(rev=1, **games):
+    return {"schema": 1, "rev": rev, "games": games}
 
 
 @pytest.fixture(autouse=True)
@@ -213,3 +213,24 @@ def test_download_pode_ser_desligado_nas_configuracoes(monkeypatch, pasta):
     assert gamedata.download_enabled() is True and "777" in gamedata.refresh()
     (pasta / "settings.json").write_text('[1]', encoding="utf-8")
     assert gamedata.download_enabled() is True
+
+
+def test_cache_mais_velho_que_o_exe_e_ignorado(pasta, monkeypatch):
+    # o exe novo trouxe uma correção (rev 2); a cópia baixada antes (rev 1) não pode passar por cima
+    emb = pasta / "embutido.json"
+    emb.write_text(json.dumps(doc(rev=2, **{"292030": mut(lambda g: g.update(name="Do exe", id="w3"))})), encoding="utf-8")
+    monkeypatch.setattr(gamedata, "embedded_path", lambda: str(emb))
+    (pasta / "games.json").write_text(json.dumps(doc(rev=1, **{"292030": mut(lambda g: g.update(name="Velho", id="w3"))})), encoding="utf-8")
+    assert gamedata.load()["292030"]["name"] == "Do exe"
+    (pasta / "games.json").write_text(json.dumps(doc(rev=2, **{"292030": mut(lambda g: g.update(name="Baixado", id="w3"))})), encoding="utf-8")
+    assert gamedata.load()["292030"]["name"] == "Baixado"
+
+
+def test_download_mais_velho_que_o_exe_nao_vira_cache(monkeypatch, pasta):
+    serve(monkeypatch, json.dumps(doc(rev=0, **{"777": copy.deepcopy(GOOD)})).encode())
+    assert gamedata.refresh() is None
+    assert not (pasta / "games.json").exists()
+
+
+def test_url_aponta_para_a_etiqueta_mapa():
+    assert "/mapa/app/games.json" in gamedata.URL and "/main/" not in gamedata.URL

@@ -2,7 +2,8 @@
 
 Ordem de uso: cópia que vai dentro do exe (app/games.json) -> cópia baixada da última vez (cache em
 %APPDATA%\\Zerometro) -> o que a internet devolver agora. Tudo passa pela mesma validação; entrada
-inválida é ignorada e o resto continua valendo. Só se baixa dado (JSON); nunca código.
+inválida é ignorada e o resto continua valendo. O campo "rev" diz qual cópia é mais nova: uma cópia
+baixada com rev menor que a do exe é ignorada (o exe novo trouxe correção). Só se baixa dado (JSON); nunca código.
 """
 import json
 import logging
@@ -16,7 +17,7 @@ from . import paths
 log = logging.getLogger("zerometro")
 
 SCHEMA = 1  # versão do formato; arquivo com "schema" maior que isso é ignorado (app antigo não entende)
-URL = "https://raw.githubusercontent.com/Igorms27/zerometro/main/app/games.json"
+URL = "https://raw.githubusercontent.com/Igorms27/zerometro/mapa/app/games.json"  # etiqueta "mapa": só o publicar-mapa.ps1 move
 MAX_BYTES = 256 * 1024
 TIMEOUT = 10
 # limites: um arquivo estragado não pode travar o app nem encher a tela
@@ -90,21 +91,28 @@ def validate(data):
     return out
 
 
-def _parse(raw):
+def _rev(data):
+    r = data.get("rev", 0) if isinstance(data, dict) else 0
+    return r if isinstance(r, int) and not isinstance(r, bool) and r >= 0 else 0
+
+
+def _parse(raw, with_rev=False):
     try:
-        return validate(json.loads(raw.decode("utf-8-sig") if isinstance(raw, bytes) else raw))
+        data = json.loads(raw.decode("utf-8-sig") if isinstance(raw, bytes) else raw)
     except (ValueError, UnicodeDecodeError, RecursionError):
-        return {}
+        return ({}, 0) if with_rev else {}
+    games = validate(data)
+    return (games, _rev(data)) if with_rev else games
 
 
-def _read(path):
+def _read(path, with_rev=False):
     try:
         if os.path.getsize(path) > MAX_BYTES:
-            return {}
+            raise OSError("grande demais")
         with open(path, "rb") as f:
-            return _parse(f.read())
+            return _parse(f.read(), with_rev)
     except OSError:
-        return {}
+        return ({}, 0) if with_rev else {}
 
 
 def embedded_path():
@@ -117,8 +125,10 @@ def cache_path():
 
 def load():
     """Embutido + cache local (o cache vence em caso de mesmo appid). Funciona sem internet."""
-    games = _read(embedded_path())
-    games.update(_read(cache_path()))
+    games, rev = _read(embedded_path(), True)
+    cached, cached_rev = _read(cache_path(), True)
+    if cached_rev >= rev:  # cópia baixada mais velha que a do exe: o exe novo trouxe correção
+        games.update(cached)
     return games
 
 
@@ -134,7 +144,10 @@ def fetch(url=URL, timeout=TIMEOUT):
     if len(raw) > MAX_BYTES:
         log.warning("games.json remoto grande demais; ignorado")
         return {}, None
-    games = _parse(raw)
+    games, rev = _parse(raw, True)
+    if games and rev < _read(embedded_path(), True)[1]:
+        log.info("games.json remoto mais velho que o do exe; ignorado")
+        return {}, None
     return games, (raw if games else None)
 
 

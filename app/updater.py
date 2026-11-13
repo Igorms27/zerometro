@@ -5,7 +5,8 @@ Cada versão publicada tem dois arquivos: Zerometro.exe e version.json ({"versio
 
 Volta atrás se a versão nova não funcionar: o exe antigo (.old) só é apagado depois que a nova
 provar que funciona (rodou por alguns minutos ou fechou normalmente depois de uns segundos de uso).
-Se ela cair duas vezes seguidas, a terceira abertura devolve o exe antigo e não tenta essa versão de novo.
+Se ela cair duas vezes seguidas logo ao abrir, a terceira abertura devolve o exe antigo e não tenta essa
+versão de novo. Ser fechada à força depois de rodar um tempo (PC desligado, finalizar tarefa) não conta.
 Limite: se o exe novo nem chega a executar o Python (ex.: falta uma DLL), ele não consegue se desfazer sozinho.
 """
 import hashlib
@@ -26,6 +27,7 @@ CHECK_EVERY = 3600  # com o app aberto, confere de novo a cada hora
 SUCCESS_AFTER = 180  # segundos rodando bem até a versão nova ser dada como boa
 CLEAN_MIN_UPTIME = 20  # fechar normalmente depois disso também vale como "funcionou"
 MAX_FAILS = 2  # aberturas seguidas que caíram antes de voltar para a versão antiga
+ALIVE_EVERY = 5  # de quanto em quanto tempo a versão em teste anota que continua viva
 
 
 def _ver(v):
@@ -117,6 +119,10 @@ def startup(current, exe=None, relaunch=True):
         _rm(_trial_path(exe))
         _rm(exe + ".old")
         return False
+    if trial.get("running") and float(trial.get("alive", 0) or 0) >= CLEAN_MIN_UPTIME:
+        # a abertura anterior rodou um tempo e só depois morreu: não é defeito da versão
+        confirm(exe)
+        return False
     fails = int(trial.get("fails", 0)) + (1 if trial.get("running") else 0)  # "running" sobrando = a abertura anterior caiu
     if fails >= MAX_FAILS:
         log.error("versão %s caiu %d vezes seguidas; voltando para a anterior", current, fails)
@@ -133,15 +139,31 @@ def startup(current, exe=None, relaunch=True):
             return True
         _rm(_trial_path(exe))  # sem versão antiga para voltar: deixa seguir
         return False
-    trial.update(fails=fails, running=True)
+    trial.update(fails=fails, running=True, alive=0)
     try:
         _write_json(_trial_path(exe), trial)
     except OSError as e:
         log.warning("não consegui anotar o teste da versão nova: %s", e)
-    t = threading.Timer(SUCCESS_AFTER, confirm, args=(exe,))
-    t.daemon = True
-    t.start()
+    threading.Thread(target=_heartbeat, args=(exe, time.time()), daemon=True).start()
     return False
+
+
+def _heartbeat(exe, t0):
+    """Enquanto a versão nova está em teste, anota há quanto tempo roda; depois de SUCCESS_AFTER, confirma."""
+    while True:
+        time.sleep(ALIVE_EVERY)
+        up = time.time() - t0
+        if up >= SUCCESS_AFTER:
+            confirm(exe)
+            return
+        trial = _read_json(_trial_path(exe))
+        if not trial:
+            return
+        trial["alive"] = round(up, 1)
+        try:
+            _write_json(_trial_path(exe), trial)
+        except OSError:
+            pass
 
 
 def finish(uptime, exe=None):

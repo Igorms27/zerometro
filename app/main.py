@@ -26,7 +26,7 @@ import report
 import updater
 from readers import covers, paths, steam
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.5.1"
 UPDATE_REPO = "Igorms27/zerometro"  # "dono/repositorio" no GitHub onde as versões são publicadas
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(BASE, "web")
@@ -67,6 +67,13 @@ GRACE = 15  # segundos sem sinal da janela até o app fechar (a janela dá sinal
 quit_now = threading.Event()
 GAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 TOKEN = secrets.token_urlsafe(24)  # novo a cada abertura; a janela recebe na URL e guarda num cookie
+# quem abre o endereço sem passar pelo app (favorito, outro navegador) vê isto em vez de um erro técnico
+NO_TOKEN_PAGE = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Zerômetro</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:system-ui,sans-serif;background:#0e1716;color:#e8efed;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px">
+<div style="max-width:420px;text-align:center"><h1 style="font-size:22px">Abra o Zerômetro pelo atalho</h1>
+<p style="color:#9fb3ae;line-height:1.6">Este endereço só funciona na janela que o próprio app abre.
+Feche esta aba e abra o Zerometro.exe (ou o atalho na Área de Trabalho).</p></div></body></html>"""
 PUBLIC_API = ("/api/ping",)  # só diz a versão; a abertura de outra instância precisa disso antes de ter o token
 
 
@@ -159,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             if not self._token_ok():
-                return self._send(403, {"ok": False, "erro": "sem token"})
+                return self._send(403, NO_TOKEN_PAGE.encode("utf-8"), "text/html; charset=utf-8")
         elif not self._guard(p):
             return
         if p != "/api/ping" or self._token_ok():
@@ -238,6 +245,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True})
 
     def do_POST(self):
+        if self.path == "/api/quit" and not self.headers.get("Origin") and self._local_only():
+            # outra versão do app está abrindo e pediu a vez. Versões 0.3.x pedem sem token; navegadores
+            # sempre mandam Origin num POST, então uma página não consegue fechar o app por aqui.
+            self._drain()
+            quit_now.set()
+            return self._send(200, {"ok": True})
         if not self._guard():
             return
         try:
@@ -328,7 +341,21 @@ def already_running():
     return True
 
 
+def selftest():
+    """Usado pelo publicar.ps1 antes de publicar: confere que o exe abre e acha tudo que precisa."""
+    for f in ("index.html", "icon.svg"):
+        if not os.path.isfile(os.path.join(WEB, f)):
+            return 2
+    try:
+        readers.scan()
+    except Exception:
+        return 3
+    return 0
+
+
 def main():
+    if "--autoteste" in sys.argv:
+        sys.exit(selftest())
     setup_log()
     if already_running():
         return
@@ -353,6 +380,10 @@ def main():
         time.sleep(1)
     log.info("janela fechada, saindo")
     srv.shutdown()
+    try:
+        os.remove(paths.data_path("token.txt"))  # o token muda a cada abertura; o velho não serve mais
+    except OSError:
+        pass
     updater.finish(time.time() - t_start)
 
 
