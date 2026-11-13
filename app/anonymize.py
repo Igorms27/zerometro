@@ -20,7 +20,44 @@ _STEAM64 = re.compile(r"7656119\d{10}")
 _STEAM64_B = re.compile(rb"7656119\d{10}")
 _USERS = re.compile(r"(?i)((?:[A-Za-z]:)?[\\/]+Users[\\/]+)(?!<usuario>)[^\\/\s\"'<>|:*?,;()\[\]{}]+")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-_IPV4 = re.compile(r"\b(?!127\.)(?!0\.)\d{1,3}(?:\.\d{1,3}){3}\b")
+# IPv4: não pega o meio de números maiores (1.2.3.4.5), octetos > 255 nem versões ("versão 1.2.3.4", "v1.2.3.4")
+_IPV4 = re.compile(r"(?<![\d.])(?!127\.)(?!0\.)\d{1,3}(?:\.\d{1,3}){3}(?!\.?\d)")
+_VERSION_BEFORE = re.compile(r"(?i)\b(vers[aã]o|version|ver|build|release|windows|win|python|app|v)[\s:=_-]{0,3}$")
+# IPv6: forma completa (8 grupos) e a abreviada com "::" que tenha algum dígito (evita "face::beef", "std::x")
+_IPV6 = re.compile(r"(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}"
+                   r"|(?:[0-9A-Fa-f]{1,4}:){1,7}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,5})?)(?![\w:])")
+
+
+def _ipv4_repl(m):
+    if any(int(p) > 255 for p in m.group().split(".")):
+        return m.group()
+    if _VERSION_BEFORE.search(m.string[max(0, m.start() - 20):m.start()]):
+        return m.group()
+    return "<ip>"
+
+
+def _ipv6_repl(m):
+    g = m.group()
+    return "<ip>" if re.search(r"[0-9]", g) else g
+
+
+def _decode_text(data):
+    """(texto, codificação, BOM) se for texto UTF-8 ou UTF-16 (com ou sem BOM); None se for binário."""
+    if data[:2] == b"\xff\xfe":
+        enc, bom, body = "utf-16-le", b"\xff\xfe", data[2:]
+    elif data[:2] == b"\xfe\xff":
+        enc, bom, body = "utf-16-be", b"\xfe\xff", data[2:]
+    elif b"\x00" in data:
+        # UTF-16 sem BOM: texto latino tem um byte zero a cada dois
+        if len(data) < 4 or len(data) % 2 or data[0::2].count(0) or data[1::2].count(0) < 0.9 * (len(data) // 2):
+            return None
+        enc, bom, body = "utf-16-le", b"", data
+    else:
+        enc, bom, body = "utf-8", b"", data
+    try:
+        return body.decode(enc), enc, bom
+    except UnicodeDecodeError:
+        return None
 _TOKEN = re.compile(r"(?i)((?:token|senha|password|secret|key)\s*[=:]\s*|[?&]t=)[^\s&\"']+")
 TEXT_EXT = {".json", ".txt", ".vdf", ".acf", ".ini", ".cfg", ".xml", ".csv", ".yaml", ".yml", ".log"}
 
@@ -70,16 +107,25 @@ class Anon:
         s = _USERS.sub(lambda m: m.group(1) + "<usuario>", s)
         return self.steam(s)
 
-    def log_line(self, s):
-        s = self.path(s)
-        s = _TOKEN.sub(lambda m: m.group(1) + "<oculto>", s)
-        s = _EMAIL.sub("<email>", s)
-        s = _IPV4.sub("<ip>", s)
+    def names(self, s):
+        """Troca o nome de usuário do Windows e o nome do PC onde aparecerem como palavra inteira."""
         if len(self.user) >= 3:
             s = re.sub(r"(?i)(?<![\w])%s(?![\w])" % re.escape(self.user), "<usuario>", s)
         if len(self.computer) >= 3:
             s = re.sub(r"(?i)(?<![\w])%s(?![\w])" % re.escape(self.computer), "<pc>", s)
         return s
+
+    def text(self, s):
+        """Texto de um arquivo: caminhos, ID Steam, nome de usuário e nome do PC (sem mexer em e-mail, IP ou token)."""
+        return self.names(self.path(s))
+
+    def log_line(self, s):
+        s = self.path(s)
+        s = _TOKEN.sub(lambda m: m.group(1) + "<oculto>", s)
+        s = _EMAIL.sub("<email>", s)
+        s = _IPV4.sub(_ipv4_repl, s)
+        s = _IPV6.sub(_ipv6_repl, s)
+        return self.names(s)
 
     def log(self, text, max_lines=1500):
         lines = text.splitlines()[-max_lines:]
@@ -101,14 +147,14 @@ class Anon:
 
     def file_content(self, name, data):
         """(bytes a gravar, True se houve troca). Só texto puro mexe; binário passa intacto."""
-        if os.path.splitext(name)[1].lower() not in TEXT_EXT or b"\x00" in data:
+        if os.path.splitext(name)[1].lower() not in TEXT_EXT:
             return data, False
-        try:
-            txt = data.decode("utf-8")
-        except UnicodeDecodeError:
+        dec = _decode_text(data)
+        if dec is None:
             return data, False
-        new = self.steam(txt)
-        return (new.encode("utf-8"), True) if new != txt else (data, False)
+        txt, enc, bom = dec
+        new = self.text(txt)
+        return (bom + new.encode(enc), True) if new != txt else (data, False)
 
 
 def steam_accounts(steam_root):
