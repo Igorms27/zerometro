@@ -1,7 +1,9 @@
-# Publica uma versão nova no GitHub. Os apps dos amigos baixam sozinhos na próxima vez que abrirem.
+﻿# Publica uma versão nova no GitHub. Os apps dos amigos baixam sozinhos na próxima vez que abrirem.
 # Antes: suba APP_VERSION em app\main.py (ex.: 0.3.0 -> 0.3.1).
 # Uso: powershell -ExecutionPolicy Bypass -File publicar.ps1 "o que mudou"
-param([string]$notas = "Versão nova do Zerômetro")
+#  ou: powershell -ExecutionPolicy Bypass -File publicar.ps1 -ArquivoNotas notas.md   (texto em UTF-8, aspas e acentos preservados)
+# Este arquivo deve ficar salvo em UTF-8 com BOM, senão o PowerShell 5 lê os acentos errado.
+param([string]$notas = "Versão nova do Zerômetro", [string]$ArquivoNotas = "")
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -27,6 +29,11 @@ $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
 $json = @{ version = $ver; sha256 = $sha } | ConvertTo-Json -Compress
 [IO.File]::WriteAllText("$PSScriptRoot\dist\version.json", $json)
 
-& $gh release create "v$ver" $exe "dist\version.json" --repo $repo --title "Zerômetro $ver" --notes $notas --latest
+# As notas vão por arquivo UTF-8 (sem BOM): passar como argumento perde aspas e acentos.
+$arqNotas = "$PSScriptRoot\dist\notas.md"
+if ($ArquivoNotas) { $notas = [IO.File]::ReadAllText((Resolve-Path $ArquivoNotas).Path, [Text.Encoding]::UTF8) }
+[IO.File]::WriteAllText($arqNotas, $notas, (New-Object Text.UTF8Encoding($false)))
+
+& $gh release create "v$ver" $exe "dist\version.json" --repo $repo --title "Zerômetro $ver" --notes-file $arqNotas --latest
 if ($LASTEXITCODE) { throw "publicação falhou" }
 Write-Host "Publicado: Zerômetro $ver. Os amigos recebem na próxima vez que abrirem o app."
