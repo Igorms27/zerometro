@@ -26,7 +26,7 @@ import report
 import updater
 from readers import covers, paths, steam
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 UPDATE_REPO = "Igorms27/zerometro"  # "dono/repositorio" no GitHub onde as versões são publicadas
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(BASE, "web")
