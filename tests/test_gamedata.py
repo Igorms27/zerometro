@@ -149,3 +149,67 @@ def test_analyze_do_witcher_continua_igual(monkeypatch):
     c = r["contents"][0]
     assert [s["done"] for s in c["segs"]] == [True, True, True, True, False, False]
     assert c["total"] == 51.5 and c["status"] == "andamento" and c["left"] == 14.5
+
+
+def test_refresh_durante_a_leitura_nao_estoura_runtimeerror(monkeypatch):
+    """Antes, refresh fazia clear()+update() no mesmo dict que o scan percorria."""
+    import threading
+    velho = {str(i): {"id": "g%d" % i} for i in range(300)}
+    monkeypatch.setattr(by_achievements, "GAMES", velho)
+    novo = {str(i): {"id": "n%d" % i} for i in range(300, 600)}
+    monkeypatch.setattr(gamedata, "refresh", lambda: dict(novo))
+    erros, parar = [], threading.Event()
+
+    def ler():
+        while not parar.is_set():
+            try:
+                for _ in list(by_achievements.GAMES.items()):
+                    pass
+                for _ in by_achievements.GAMES.items():
+                    pass
+            except RuntimeError as e:  # "dictionary changed size during iteration"
+                erros.append(e)
+    t = threading.Thread(target=ler)
+    t.start()
+    for _ in range(300):
+        by_achievements.refresh()
+    parar.set()
+    t.join()
+    assert not erros
+    assert by_achievements.GAMES == novo and len(velho) == 300  # o dict antigo nunca é mexido
+
+
+def test_texto_com_quebra_de_linha_no_fim_nao_passa_na_validacao():
+    g = copy.deepcopy(GOOD)
+    g["id"] = "g1\n"
+    assert gamedata._game(g) is None
+    g = copy.deepcopy(GOOD)
+    g["contents"][0]["key"] = "base\n"
+    assert gamedata._game(g) is None
+    g = copy.deepcopy(GOOD)
+    g["contents"][0]["segs"][0]["ach"] = ["X\n"]
+    assert gamedata._game(g) is None
+    assert gamedata.validate(doc(**{"777\n": copy.deepcopy(GOOD)})) == {}
+    assert gamedata.validate(doc(**{"٣٣٣": copy.deepcopy(GOOD)})) == {}  # dígitos não ASCII
+
+
+@pytest.mark.parametrize("valor", [5, None, ["g1"], {"a": 1}])
+def test_id_e_key_precisam_ser_texto(valor):
+    g = copy.deepcopy(GOOD)
+    g["id"] = valor
+    assert gamedata._game(g) is None
+    g = copy.deepcopy(GOOD)
+    g["contents"][0]["key"] = valor
+    assert gamedata._game(g) is None
+
+
+def test_download_pode_ser_desligado_nas_configuracoes(monkeypatch, pasta):
+    visto = serve(monkeypatch, json.dumps(doc(**{"777": copy.deepcopy(GOOD)})).encode())
+    (pasta / "settings.json").write_text('{"baixar_mapa": false}', encoding="utf-8")
+    assert gamedata.download_enabled() is False
+    assert gamedata.refresh() is None
+    assert visto == {} and not (pasta / "games.json").exists()  # nem tentou a rede
+    (pasta / "settings.json").write_text('{"baixar_mapa": true}', encoding="utf-8")
+    assert gamedata.download_enabled() is True and "777" in gamedata.refresh()
+    (pasta / "settings.json").write_text('[1]', encoding="utf-8")
+    assert gamedata.download_enabled() is True
