@@ -34,10 +34,12 @@ def test_ping_sem_token(porta):
 @pytest.mark.parametrize("metodo,path", [
     ("GET", "/api/library"), ("GET", "/api/scan"), ("GET", "/api/steam-games"),
     ("GET", "/api/report/pick"), ("GET", "/"), ("PUT", "/api/library/x"),
-    ("DELETE", "/api/library/x"), ("POST", "/api/quit"), ("POST", "/api/bye"),
+    ("DELETE", "/api/library/x"), ("POST", "/api/bye"),
 ])
 def test_sem_token_e_proibido(porta, metodo, path):
-    r, _ = req(porta, metodo, path, body=b"{}" if metodo in ("PUT", "POST") else None)
+    # Origin como um navegador mandaria: páginas nunca passam sem o token
+    r, _ = req(porta, metodo, path, {"Origin": "http://127.0.0.1:%d" % porta},
+               body=b"{}" if metodo in ("PUT", "POST") else None)
     assert r.status == 403
     assert not main.quit_now.is_set()
 
@@ -82,3 +84,30 @@ def test_host_de_fora_continua_bloqueado(porta):
     assert r.status == 403
     r, _ = req(porta, "GET", "/api/library", {"Origin": "http://exemplo.com", "X-ZM-Token": main.TOKEN})
     assert r.status == 403
+
+
+def test_quit_de_pagina_sem_token_e_proibido(porta):
+    for origin in ("http://127.0.0.1:%d" % porta, "https://exemplo.com"):
+        r, _ = req(porta, "POST", "/api/quit", {"Origin": origin}, body=b"{}")
+        assert r.status == 403
+    assert not main.quit_now.is_set()
+
+
+def test_quit_de_versao_antiga_do_app_funciona_sem_token(porta):
+    # o app 0.3.x pede para a instância aberta fechar sem token e sem Origin
+    try:
+        r, _ = req(porta, "POST", "/api/quit", body=b"{}")
+        assert r.status == 200 and main.quit_now.is_set()
+    finally:
+        main.quit_now.clear()
+
+
+def test_quit_de_outro_host_e_proibido(porta):
+    r, _ = req(porta, "POST", "/api/quit", {"Host": "evil.example"}, body=b"{}")
+    assert r.status == 403 and not main.quit_now.is_set()
+
+
+def test_abrir_sem_token_mostra_pagina_explicando(porta):
+    r, data = req(porta, "GET", "/")
+    assert r.status == 403 and r.getheader("Content-Type").startswith("text/html")
+    assert "pelo atalho" in data.decode("utf-8")

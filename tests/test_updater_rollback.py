@@ -16,23 +16,49 @@ def exe(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "executable", str(p))
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(updater, "state", {"ready": None, "latest": None, "status": None})
-    monkeypatch.setattr(updater.threading, "Timer", FakeTimer)  # sem esperar minutos de verdade
-    FakeTimer.criados.clear()
+    monkeypatch.setattr(updater.threading, "Thread", FakeThread)  # sem esperar minutos de verdade
+    FakeThread.criados.clear()
     return str(p)
 
 
-class FakeTimer:
+class FakeThread:
     criados = []
 
-    def __init__(self, interval, fn, args=()):
-        self.interval, self.fn, self.args, self.daemon = interval, fn, args, False
-        FakeTimer.criados.append(self)
+    def __init__(self, target, args=(), daemon=None):
+        self.target, self.args, self.daemon = target, args, daemon
+        FakeThread.criados.append(self)
 
     def start(self):
         pass
 
-    def dispara(self):
-        self.fn(*self.args)
+    def dispara(self, monkeypatch=None, segundos=None):
+        """Roda o batimento como se o app tivesse ficado aberto `segundos` (padrão: o bastante para confirmar)."""
+        exe, t0 = self.args
+        segundos = updater.SUCCESS_AFTER if segundos is None else segundos
+        relogio = iter([t0 + min(segundos, s) for s in range(updater.ALIVE_EVERY, 10 ** 6, updater.ALIVE_EVERY)])
+        mp = monkeypatch or pytest.MonkeyPatch()
+        mp.setattr(updater.time, "sleep", lambda s: None)
+        mp.setattr(updater.time, "time", lambda: next(relogio))
+        if segundos < updater.SUCCESS_AFTER:
+            # para depois de `segundos`: simula o processo morrendo ali
+            parar = {"n": segundos // updater.ALIVE_EVERY}
+            real = updater._write_json
+
+            def grava(p, d):
+                real(p, d)
+                parar["n"] -= 1
+                if parar["n"] <= 0:
+                    raise SystemExit
+            mp.setattr(updater, "_write_json", grava)
+            try:
+                self.target(*self.args)
+            except SystemExit:
+                pass
+            mp.setattr(updater, "_write_json", real)
+        else:
+            self.target(*self.args)
+        if monkeypatch is None:
+            mp.undo()
 
 
 def publica(tmp_path, versao, conteudo=b"NOVO", sha=None):
@@ -91,13 +117,13 @@ def test_abrir_a_versao_nova_nao_apaga_o_antigo_ainda(tmp_path, exe):
     assert updater.startup("0.4.0", relaunch=False) is False
     assert os.path.exists(exe + ".old")  # ainda em teste
     assert json.loads(ler(exe + ".trial"))["running"] is True
-    assert len(FakeTimer.criados) == 1 and FakeTimer.criados[0].interval == updater.SUCCESS_AFTER
+    assert len(FakeThread.criados) == 1 and FakeThread.criados[0].target == updater._heartbeat
 
 
 def test_rodar_alguns_minutos_confirma_e_apaga_o_antigo(tmp_path, exe):
     instala(tmp_path, exe)
     updater.startup("0.4.0", relaunch=False)
-    FakeTimer.criados[0].dispara()
+    FakeThread.criados[0].dispara()
     assert not os.path.exists(exe + ".old") and not os.path.exists(exe + ".trial")
     assert ler(exe) == b"NOVO"
 
@@ -203,3 +229,24 @@ def test_rodando_pelo_python_nao_mexe_em_nada(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "executable", str(py))
     assert updater.startup("0.3.8") is False
     assert sorted(os.listdir(tmp_path)) == ["python.exe", "python.exe.old"]
+
+
+# ---------- fechado à força depois de rodar um tempo não é defeito ----------
+
+def test_morrer_depois_de_rodar_um_tempo_nao_conta_como_queda(tmp_path, exe, monkeypatch):
+    instala(tmp_path, exe)
+    for _ in range(updater.MAX_FAILS + 1):  # PC desligado várias vezes, sempre depois de ~1 minuto
+        assert updater.startup("0.4.0", relaunch=False) is False
+        if not os.path.exists(exe + ".trial"):
+            break
+        FakeThread.criados[-1].dispara(monkeypatch, segundos=60)
+    assert ler(exe) == b"NOVO"  # não voltou para a antiga
+    assert not os.path.exists(exe + ".skip")
+
+
+def test_cair_logo_ao_abrir_ainda_volta_para_a_antiga(tmp_path, exe):
+    instala(tmp_path, exe)
+    for _ in range(updater.MAX_FAILS):
+        assert updater.startup("0.4.0", relaunch=False) is False  # e "cai" sem anotar tempo nenhum
+    assert updater.startup("0.4.0", relaunch=False) is True
+    assert ler(exe) == b"VELHO"
