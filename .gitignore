@@ -14,3 +14,5 @@ venv/
 .vscode/
 .idea/
 Thumbs.db
+.wt/
+*.spec
