@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import re
+import struct
 import time
 import zipfile
 
@@ -181,6 +182,15 @@ def find_folders(name, appid=None):
     return out[:12]
 
 
+def _zip_date(mtime):
+    """Data do arquivo no formato do zip (1980 a 2107); fora disso, encosta no limite mais próximo."""
+    lo, hi = (1980, 1, 1, 0, 0, 0), (2107, 12, 31, 23, 59, 58)
+    try:
+        return min(max(time.localtime(mtime)[:6], lo), hi)
+    except (OverflowError, OSError, ValueError):
+        return lo
+
+
 def _desktop():
     try:
         import ctypes
@@ -237,12 +247,13 @@ def build(name, appid, folders, app_version):
                     data, _changed = an.file_content(p, data)
                     if _changed is False and an.has_id(data):
                         manifest["steamid_no_conteudo"].append(dict(folder=i, file=shown))
-                    zi = zipfile.ZipInfo("saves/%d/%s" % (i, shown.replace("\\", "/")), date_time=max(time.localtime(mtime)[:6], (1980, 1, 1, 0, 0, 0)))
+                    zi = zipfile.ZipInfo("saves/%d/%s" % (i, shown.replace("\\", "/")), date_time=_zip_date(mtime))
                     zi.compress_type = zipfile.ZIP_DEFLATED  # mantém a data do arquivo, útil para ver qual save é o mais novo
                     z.writestr(zi, data)
                     total += size
-                except OSError:
-                    manifest["skipped"].append(dict(folder=i, file=shown, size=size, erro="sem acesso"))
+                except (OSError, ValueError, struct.error) as e:  # data que o zip não aceita (antes de 1980: ValueError; depois de 2107: struct.error)
+                    manifest["skipped"].append(dict(folder=i, file=shown, size=size,
+                                                    erro="sem acesso" if isinstance(e, OSError) else "data invalida"))
             manifest["folders"].append(dict(index=i, path=an.path(folder), files=listing))
         if appid:
             schema, users = steam.stats_files(appid)

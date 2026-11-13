@@ -85,6 +85,54 @@ def test_texto_troca_id_e_binario_passa_intacto(an):
     assert an.file_content("a.txt", b"\xff\xfe\xfa") == (b"\xff\xfe\xfa", False)  # não é UTF-8
 
 
+def test_texto_troca_usuario_e_pc_no_conteudo(an):
+    src = json.dumps({"dono": "MariaSilva", "pc": "pc-da-maria", "dir": HOME + "\\Saved", "nome": "MariaSilvana", "n": 3})
+    t, mudou = an.file_content("perfil.json", src.encode())
+    out = t.decode()
+    assert mudou and "MariaSilva\"" not in out and "<usuario>" in out and "<pc>" in out and "%USERPROFILE%" in out
+    assert "MariaSilvana" in out and json.loads(out)["n"] == 3  # só palavra inteira; continua JSON válido
+    ini = "[Perfil]\nUser=MariaSilva\nPath=%s\\x\n" % HOME
+    t, _ = an.file_content("c.ini", ini.encode())
+    assert b"MariaSilva" not in t
+
+
+def test_texto_sem_dados_pessoais_fica_identico_inclusive_com_ip_e_versao(an):
+    raw = b'{"versao": "1.2.3.4", "ip": "192.168.0.12"}'
+    t, mudou = an.file_content("a.json", raw)
+    assert t == raw and not mudou  # e-mail/IP no conteúdo de arquivo não são mexidos, só no log
+
+
+@pytest.mark.parametrize("enc,bom", [("utf-16-le", b"\xff\xfe"), ("utf-16-be", b"\xfe\xff"), ("utf-16-le", b"")])
+def test_texto_utf16_tambem_e_tratado(an, enc, bom):
+    src = '{"u": "MariaSilva", "id": "%s", "p": "%s"}' % (ID64, HOME.replace("\\", "/"))
+    t, mudou = an.file_content("perfil.json", bom + src.encode(enc))
+    assert mudou and t[:len(bom)] == bom
+    out = t[len(bom):].decode(enc)
+    assert "MariaSilva" not in out and ID64 not in out and "STEAMID_" in out
+    assert json.loads(out)["u"] == "<usuario>"
+
+
+def test_binario_com_zeros_nao_e_confundido_com_utf16(an):
+    raw = b"\x01\x00\x02\x00" + b"\x00\x01\x02\x03" * 10 + ID64.encode()
+    assert an.file_content("x.json", raw) == (raw, False)
+
+
+def test_log_nao_troca_versao_por_ip_mas_troca_ip_de_verdade(an):
+    for linha in ("Zerometro v1.2.3.4 abriu", "versão 10.0.26300.1", "version=1.2.3.4", "build 1.2.3.4",
+                  "numero 1.2.3.4.5", "valor 300.1.1.1", "Windows 10.0.19045.1"):
+        assert an.log_line(linha) == linha, linha
+    assert an.log_line("servidor 10.0.0.5 respondeu") == "servidor <ip> respondeu"
+    assert an.log_line("conectou em 8.8.8.8.") == "conectou em <ip>."
+    assert an.log_line("server 10.0.0.5") == "server <ip>"  # "ver" dentro de "server" não é versão
+
+
+def test_log_filtra_ipv6_sem_tocar_em_horas_nem_loopback(an):
+    out = an.log_line("de fe80::1ff:fe23:4567:890a e 2001:db8::1 e 2001:0db8:85a3:0000:0000:8a2e:0370:7334 ok")
+    assert out == "de <ip> e <ip> e <ip> ok"
+    for linha in ("::1 local", "hora 12:34:56", "std::string e face::beef", "mac aa:bb:cc:dd:ee:ff"):
+        assert an.log_line(linha) == linha, linha
+
+
 def test_head_hex_zera_o_id_com_mesmo_tamanho(an):
     raw = b"GVAS" + ID64.encode() + b"\x01\x02"
     h = an.head_hex(raw)
@@ -136,3 +184,38 @@ def test_relatorio_completo_nao_vaza_e_mantem_o_save(tmp_path, monkeypatch):
         assert man["steamid_no_conteudo"] == [dict(folder=0, file="slot1.sav")]  # avisa onde o ID ficou
         assert [f["file"] for f in man["folders"][0]["files"]] and ID64.encode().hex() not in z.read("relatorio.json").decode()
         assert "ok" in z.read("zerometro.log").decode()
+
+
+def test_data_do_arquivo_fora_do_limite_do_zip(tmp_path, monkeypatch):
+    assert report._zip_date(0)[0] == 1980  # antes de 1980
+    assert report._zip_date(10 ** 10)[0] == 2107  # ano 2286
+    assert report._zip_date(float("inf")) == (1980, 1, 1, 0, 0, 0)  # nem localtime aceita
+    saves = tmp_path / "Saves"
+    saves.mkdir()
+    (saves / "a.sav").write_bytes(b"GVAS1")
+    (saves / "b.sav").write_bytes(b"GVAS2")
+    desk = tmp_path / "Desktop"
+    desk.mkdir()
+    app = tmp_path / "App"
+    app.mkdir()
+    monkeypatch.setattr(report, "_desktop", lambda: str(desk))
+    monkeypatch.setattr(report.paths, "APP_DIR", str(app))
+    monkeypatch.setattr(report.steam, "steam_root", lambda: None)
+    # sem o clamp, o zip recusaria a data: ValueError (antes de 1980) ou struct.error (depois de 2107)
+    for ruim in ((1970, 1, 1, 0, 0, 0), (3000, 1, 1, 0, 0, 0)):
+        monkeypatch.setattr(report, "_zip_date", lambda m, ruim=ruim: ruim)
+        r = report.build("Jogo", None, [str(saves)], "9.9.9")
+        with zipfile.ZipFile(r["path"]) as z:
+            man = json.loads(z.read("relatorio.json"))
+            assert [s["erro"] for s in man["skipped"]] == ["data invalida"] * 2
+            assert not [n for n in z.namelist() if n.startswith("saves/")]
+        os.remove(r["path"])
+    monkeypatch.undo()
+    # com a data real do arquivo em 2286 o relatório sai normal
+    monkeypatch.setattr(report, "_desktop", lambda: str(desk))
+    monkeypatch.setattr(report.paths, "APP_DIR", str(app))
+    monkeypatch.setattr(report.steam, "steam_root", lambda: None)
+    os.utime(saves / "a.sav", (10 ** 10, 10 ** 10))
+    r = report.build("Jogo", None, [str(saves)], "9.9.9")
+    with zipfile.ZipFile(r["path"]) as z:
+        assert "saves/0/a.sav" in z.namelist() and z.getinfo("saves/0/a.sav").date_time[0] == 2107
